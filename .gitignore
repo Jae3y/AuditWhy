@@ -19,3 +19,6 @@ htmlcov/
 Thumbs.db
 .vscode/
 .idea/
+
+logs/*.jsonl
+logs/hmem_state_store.json
