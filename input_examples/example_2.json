@@ -1,0 +1,10 @@
+{
+  "run_id": "example-2-warm-compounding",
+  "input": {
+    "query": "Re-evaluate our Computer & Office Equipment enterprise exposure and SLA risk for Q4, incorporating our resolved SIC taxonomy rules and regional weather disruptions."
+  },
+  "options": {
+    "sample_mode": true,
+    "warm_memory_seed": true
+  }
+}

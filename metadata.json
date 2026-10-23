@@ -1,0 +1,56 @@
+{
+  "name": "AuditWhy",
+  "version": "1.0.0",
+  "hackathon": "Open Agent Hackathon 2026",
+  "tagline": "Autonomous multi-agent financial, taxonomic, and operational discrepancy investigator that explains WHY enterprise metrics diverge, catches cross-system data quality orphans, blocks unverified hypotheses, and compounds institutional memory.",
+  "tracks": {
+    "primary": "Track 02 — The Agent That Can Explain Why",
+    "secondary": [
+      "Track 01 — Solving Fragmented Intelligence",
+      "Track 03 — Reasoning Architecture"
+    ]
+  },
+  "sponsor_stack": {
+    "data_layer": {
+      "sponsor": "Zetaris",
+      "components": [
+        "Zetaris Networked Data Platform REST SQL Client (Port 8888 /api/v1.0)",
+        "Unified Semantic Layer (USL) COMPILE & ACTIVATE Pipeline",
+        "Data Quality (DQ) Foreign Key Check (fk_sic_check) catching the IBM SIC 3570 vs 4-digit leaf anomaly"
+      ]
+    },
+    "build_layer": {
+      "sponsor": "Meterless Engines",
+      "components": [
+        "H-MEM (7-Service Hierarchical Memory with 8-term hybrid scoring, Trust Ledger, Conflict Detection & Sleep Preview)",
+        "Markovian (Bounded-context chunk reasoning with [STATE_CHECKPOINT]/[TASK_COMPLETE] protocol & 4-step carryover cascade)",
+        "World Model (Idempotent 6-stage entity/observation pipeline with deterministic SHA-256 ent_ IDs)",
+        "Scout Intent (5-layer security guard + HMAC-SHA256 signed ExecutionContracts)"
+      ]
+    },
+    "power_layer": {
+      "sponsor": "Meterless Nightshift Runtime 1.4 & NVIDIA Nemotron",
+      "components": [
+        "Meterless Nightshift Runtime 1.4 (Provider Contract v4, /connect link parser, /v1/models discovery, rt-local rejection)",
+        "NVIDIA NIM Nemotron Routing (nemotron-3.5-lightning-30b-a3b, nemotron-3-ultra-550b-a55b, nemotron-3.5-super-vl-120b-a12b)",
+        "Deterministic Structured Reasoning Generator for zero-credential offline judge reproducibility"
+      ]
+    },
+    "development_workflow": {
+      "sponsor": "Cursor",
+      "components": [
+        "Multi-file architectural synthesis, AGENTS.md contract conformance verification, and iterative test-driven refinement"
+      ]
+    }
+  },
+  "entrypoints": {
+    "server": "python run.py",
+    "cli": "python run.py --input input_examples/example_1.json --output output_examples/example_1.json",
+    "health": "GET /health",
+    "run": "POST /run",
+    "dashboard": "GET /",
+    "tests": "python -m pytest tests/ -v",
+    "conformance": "python scripts/run_conformance.py",
+    "smoke_test": "python scripts/smoke_test.py"
+  }
+}

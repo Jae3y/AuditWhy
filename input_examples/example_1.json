@@ -1,0 +1,10 @@
+{
+  "run_id": "example-1-cold-investigation",
+  "input": {
+    "query": "Why did Q3 enterprise retention drop across our Computer & Office Equipment accounts, and how do SEC EDGAR revenues compare with our internal support escalation and billing tables?"
+  },
+  "options": {
+    "sample_mode": true,
+    "warm_memory_seed": false
+  }
+}
