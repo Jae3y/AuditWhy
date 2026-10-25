@@ -39,3 +39,8 @@ secrets/
 credentials/
 credentials.json
 secrets.toml
+
+# Vercel project link (local)
+.vercel
+
+.vercel

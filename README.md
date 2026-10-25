@@ -4,6 +4,8 @@
 
 **Track:** The Agent That Can Explain Why · **Sponsor tech:** Zetaris (data) · Meterless Engines + Nightshift (build/power) · NVIDIA Nemotron (models) · Cursor (dev) · **Run:** `python run.py` → `POST /run`
 
+**Live demo:** https://auditwhy.vercel.app (sample mode, no login; `POST https://auditwhy.vercel.app/run` accepts the same payloads as `input_examples/`)
+
 [![CI](https://github.com/Jae3y/AuditWhy/actions/workflows/ci.yml/badge.svg)](https://github.com/Jae3y/AuditWhy/actions/workflows/ci.yml) [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FJae3y%2FAuditWhy&project-name=auditwhy)
 
 ---
@@ -187,7 +189,7 @@ Per the Participant Setup Guide, Zetaris and Nightshift run **on your machine**.
 The agents query canonical names (`edgar.company_facts`, `erp.customer_churn_billing`, ...). `data/zetaris_table_map.json` maps them to what exists on your instance; override it with `ZETARIS_TABLE_MAP` if you used different names. `provider_routing.calls[].served_by` records the concrete Nemotron model behind each Nightshift routing mode, which is the evidence the NVIDIA Nemotron award asks for.
 
 ### 6. Public Demo (Vercel)
-The **Deploy with Vercel** button above (or importing the repo at vercel.com/new) deploys `api/index.py` with zero configuration. A hosted instance has no route to your local Zetaris or Nightshift, so it always runs sample mode: the full agent loop on `data/sample/`, with credential editing disabled. Traces and H-MEM live in `/tmp`, so compounding persists only while an instance stays warm. For the live stack, run locally (section 5).
+Hosted at **https://auditwhy.vercel.app**, and every push to `main` redeploys it. The **Deploy with Vercel** button above (or importing the repo at vercel.com/new) deploys your own copy: Vercel's FastAPI preset serves `api/index.py` with no further configuration. A hosted instance has no route to your local Zetaris or Nightshift, so it always runs sample mode: the full agent loop on `data/sample/`, with credential editing disabled. Traces and H-MEM live in `/tmp`, so compounding persists only while an instance stays warm. For the live stack, run locally (section 5).
 
 ---
 

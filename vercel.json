@@ -5,6 +5,5 @@
       "maxDuration": 60,
       "includeFiles": "{app/**,data/**,input_examples/**,scripts/zetaris_usl_setup.sql,run.py}"
     }
-  },
-  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+  }
 }
