@@ -98,8 +98,20 @@ flowchart TD
 
 ## Quickstart Commands
 
+### 0. The Three-Minute Demo (one command)
+```bash
+python scripts/demo.py --pause
+```
+Plays the whole story against a throwaway memory store, so it is identical on every machine:
+1. **Cold catch:** the evaluator's own DQ check finds IBM's summary SIC 3570 and Pass 2 reconciles it ($62.753B restored), while pricing and competitor claims are blocked.
+2. **Compounding:** a *differently worded* question reuses the mined rule (2 → 1 retrieval passes, 4 → 3 stages, trust ledger `helpful`).
+3. **Adversarial block:** prompt injection is refused before any SQL or model call.
+4. **Proof it isn't scripted:** Oracle's SIC is changed to 7370 live; the new orphan is caught and restored revenue is recomputed. Asking about Oracle refutes the retention-drop hypothesis.
+
+`--pause` waits for Enter between acts.
+
 ### 1. Local Virtual Environment (`SAMPLE_MODE=true` — Zero Credentials Required)
-Judges can run the entire 6-agent state machine, all 4 Meterless Engines, SQL execution over `data/sample/`, and test verification immediately with zero external API keys:
+Requires **Python 3.11+** (CI runs 3.11 and 3.12). Judges can run the entire 6-agent state machine, all 4 Meterless Engines, SQL execution over `data/sample/`, and test verification immediately with zero external API keys:
 
 ```bash
 # 1. Create and activate virtual environment
@@ -172,6 +184,8 @@ Every number, status and sentence in a `RunResponse` is derived from rows the ag
 6. **Critique the claims.** The evaluator blocks any claim whose required datasets returned no rows. Correlation claims also need `|r| ≥ 0.7` with `n ≥ 5`, otherwise they are downgraded to `inconclusive`. Blocked claims become `untested_factors`, together with the data needed to test them.
 7. **Review.** `FinalReviewerAgent` checks three gates: the caveat names every untested factor and every correlational statistic; the summary contains no causal language about a blocked factor; and every finding cites evidence tables.
 
+**Leaf policy:** a summary code usually has several leaves beneath it (3570 has 3571–3579). By default the filer is mapped to the primary leaf (`primary_leaf`, the SIC "...1" convention, so 3571 Electronic Computers), which never depends on who else is in the dataset. `AUDITWHY_SIC_LEAF_POLICY=peer_majority` maps it to the leaf most used by its industry-group peers instead. Either way the filer stays in its industry group, so group-level revenue and ARR totals are identical. Each finding records the policy used and every candidate, so the attribution is auditable.
+
 Confidence is computed, not asserted: H3 uses the lower bound of the 95% Fisher-z confidence interval on Pearson r, and the run's overall confidence is the mean of tested hypotheses, discounted 5% per untested one. The same pipeline handles questions the demo never anticipated. Ask about Oracle and the focus becomes Oracle, and H1 is **refuted** (102% net retention).
 
 ### H-MEM Memory Policy (`options.warm_memory_seed`)
@@ -230,7 +244,9 @@ Rules are scored by outcome. A recalled rule that restores its filer gets `helpf
 
 | Failure Scenario | Detection Mechanism | Autonomous Recovery / Mitigation | Trace Status Logged |
 | :--- | :--- | :--- | :--- |
-| **Zetaris Cluster Unreachable / Timeout** | `httpx` timeout (`20s`) after 3 `tenacity` exponential retries | Logs `fallback_to_sample_data` and executes SQL against `SampleZetarisEngine` (`data/sample/`) | `fallback` |
+| **Zetaris Cluster Unreachable / Timeout** | Transport errors, 5xx and 429 get 3 `tenacity` exponential retries (a 4xx is final and is not retried) | Logs `fallback_to_sample_data` and opens a per-run circuit breaker, so the remaining queries go straight to `SampleZetarisEngine` instead of each paying the retry backoff | `fallback` |
+| **Live Zetaris Catalog Miss** | 4xx whose body says the table or view does not exist | Returned as `TABLE_NOT_FOUND` (same contract as the mirror) rather than silently answered from sample data | `success` (claim later blocked) |
+| **Columnar or Nested Zetaris Payload** | `normalize_zetaris_rows()` | Accepts row-dicts, `columns` + row arrays, and `result`-nested shapes, so evidence is never silently empty | `success` |
 | **Cross-Source Foreign Key Orphan (any summary SIC)** | `EvidenceEvaluatorAgent` runs `SHOW DQ ALL INVALID TABLE sic_edgar_usl` and diffs it against leaf-bearing joined rows | Emits `needs_revision`; Pass 2 expands each orphan through `parent_summary_code`; evaluator re-verifies (bounded by `max_retries`) | `needs_revision` $\rightarrow$ `retrying` $\rightarrow$ `success` |
 | **Unverified Analyst Claim (`H4` pricing, competitor displacement)** | Provenance gate: a required dataset returned `0` rows or `TABLE_NOT_FOUND` | Blocks the claim (`flag_unsupported_claim`) and moves it to `untested_factors` with the data needed to test it | `partial_success` $\rightarrow$ `success` |
 | **Weak or Under-Powered Correlation** | Statistical gate: `|r| < 0.7` or `n < 5` | Downgrades the hypothesis to `inconclusive` instead of asserting it | `success` |
@@ -253,11 +269,14 @@ Rules are scored by outcome. A recalled rule that restores its filer gets `helpf
 
 ## Conformance & Test Suite Summary
 
-Running `python -m pytest tests/ -v` (47 tests) and `python scripts/run_conformance.py` verifies the following. Tests run against an isolated logs/H-MEM directory (`tests/conftest.py`), so results never depend on a previous run.
+GitHub Actions (`.github/workflows/ci.yml`) runs the test suite, conformance, smoke test and the demo on Python 3.11 and 3.12, then builds the Docker image and probes `/health` and `/run` inside the container.
+
+`python scripts/run_conformance.py` verifies 7 subsystems: the four engines, the provider contract, the Zetaris DQ rule, and the orchestrated cold → compounding path. Running `python -m pytest tests/ -v` (65 tests) verifies the following. Tests run against an isolated logs/H-MEM directory (`tests/conftest.py`), so results never depend on a previous run.
 - `tests/test_engines_conformance.py`: H-MEM mandatory source gate, 8-factor math, trust protection, non-mutating sleep preview; Markovian bounds, marker stripping, token math, memory seam; World Model `ent_` SHA-256 determinism & zero-diff idempotency; Scout Intent injection blocking & HMAC-SHA256 verification.
 - `tests/test_provider_contract.py`: URL normalisation never `/v1/v1`, `rt-local` rejection, 8 `parse_connect_link` edge cases, and Nemotron task routing.
 - `tests/test_end_to_end.py`: `GET /health`, the three canonical examples, Vibe Coding payload, workbench, telemetry and USL setup.
 - `tests/test_investigation_integrity.py`: perturbs the warehouse and the question to prove verdicts are data-driven. Covers multiple and unseen summary codes (`7370`), a clean taxonomy with no revision, numbers that track the rows, focus-dependent refutation, organic compounding, the cold policy, the wrong-rule trust loop, and the evaluator's provenance and statistical gates.
+- `tests/test_platform.py`: both leaf policies and their audit trail; six Zetaris payload shapes; live catalog-miss reporting without retries; the circuit breaker; telemetry tailing of large logs; and `LOG_LEVEL` behaviour.
 - `tests/test_security.py`: engine-level write refusal, read-only workbench, `run_id` traversal, admin gating and key-redirect protection, `.env` injection, Luhn PII redaction, the shared rate limit, the non-public signing key, dashboard escaping, and the Nemotron `chat_template_kwargs` payload.
 
 ---

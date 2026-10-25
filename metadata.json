@@ -1,6 +1,6 @@
 {
   "name": "AuditWhy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "hackathon": "Open Agent Hackathon 2026",
   "tagline": "Autonomous multi-agent financial, taxonomic, and operational discrepancy investigator that explains WHY enterprise metrics diverge, catches cross-system data quality orphans, blocks unverified hypotheses, and compounds institutional memory.",
   "tracks": {
@@ -16,14 +16,15 @@
       "components": [
         "Zetaris Networked Data Platform REST SQL Client (Port 8888 /api/v1.0)",
         "Unified Semantic Layer (USL) COMPILE & ACTIVATE Pipeline",
-        "Data Quality (DQ) Foreign Key Check (fk_sic_check) catching the IBM SIC 3570 vs 4-digit leaf anomaly"
+        "Data Quality (DQ) Foreign Key Check (fk_sic_check) catching the IBM SIC 3570 vs 4-digit leaf anomaly",
+        "Generic fk_sic_check orphan detection and parent_summary_code hierarchy recovery (no company- or code-specific logic)"
       ]
     },
     "build_layer": {
       "sponsor": "Meterless Engines",
       "components": [
-        "H-MEM (7-Service Hierarchical Memory with 8-term hybrid scoring, Trust Ledger, Conflict Detection & Sleep Preview)",
-        "Markovian (Bounded-context chunk reasoning with [STATE_CHECKPOINT]/[TASK_COMPLETE] protocol & 4-step carryover cascade)",
+        "H-MEM (7-Service Hierarchical Memory with 8-term hybrid scoring, outcome-scored Trust Ledger, rule reinforcement, Conflict Detection & Sleep Preview)",
+        "Markovian (Bounded-context chunk reasoning: each chunk is a real analysis stage, [STATE_CHECKPOINT]/[TASK_COMPLETE] protocol, 4-step carryover cascade, measured vs spec-projected token ledgers)",
         "World Model (Idempotent 6-stage entity/observation pipeline with deterministic SHA-256 ent_ IDs)",
         "Scout Intent (5-layer security guard + HMAC-SHA256 signed ExecutionContracts)"
       ]
@@ -33,7 +34,7 @@
       "components": [
         "Meterless Nightshift Runtime 1.4 (Provider Contract v4, /connect link parser, /v1/models discovery, rt-local rejection)",
         "NVIDIA NIM Nemotron Routing (nemotron-3.5-lightning-30b-a3b, nemotron-3-ultra-550b-a55b, nemotron-3.5-super-vl-120b-a12b)",
-        "Deterministic Structured Reasoning Generator for zero-credential offline judge reproducibility"
+        "Data-grounded deterministic fallback text supplied by each agent for zero-credential offline judge reproducibility (verdicts are always computed in code)"
       ]
     },
     "development_workflow": {
@@ -51,6 +52,8 @@
     "dashboard": "GET /",
     "tests": "python -m pytest tests/ -v",
     "conformance": "python scripts/run_conformance.py",
-    "smoke_test": "python scripts/smoke_test.py"
-  }
+    "smoke_test": "python scripts/smoke_test.py",
+    "demo": "python scripts/demo.py --pause"
+  },
+  "requires_python": ">=3.11"
 }

@@ -26,3 +26,6 @@ logs/hmem_state_store.json
 logs/*.json.tmp
 
 data/*.db.tmp
+
+# Local editor/agent tooling
+.claude/

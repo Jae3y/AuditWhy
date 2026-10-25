@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    env:
+      SAMPLE_MODE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Unit, integrity, security and end-to-end tests
+        run: python -m pytest tests/ -q
+      - name: Sponsor-stack conformance
+        run: python scripts/run_conformance.py
+      - name: Smoke test
+        run: python scripts/smoke_test.py
+      - name: Judge demo runs end to end
+        run: python scripts/demo.py
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t auditwhy:ci .
+      - name: Boot and probe /health and /run
+        run: |
+          docker run -d --name auditwhy -p 8000:8000 auditwhy:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/health && break; sleep 1; done
+          curl -fsS -X POST http://127.0.0.1:8000/run -H 'Content-Type: application/json' \
+            -d @input_examples/example_1.json | python -c "import json,sys; b=json.load(sys.stdin); assert b['status']=='success', b['status']; print('run ok', b['confidence'])"
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs auditwhy

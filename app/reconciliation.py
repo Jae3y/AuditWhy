@@ -8,10 +8,20 @@ hierarchy-aware SQL that applies it, with no company- or code-specific special c
 
 from __future__ import annotations
 
+import os
 import re
+from collections import Counter
 from typing import Any, Dict, Iterable, List, Optional
 
 _SIC_CODE = re.compile(r"^\d{3,4}$")
+
+LEAF_POLICIES = ("primary_leaf", "peer_majority")
+
+
+def active_leaf_policy() -> str:
+    """Reconciliation policy, overridable with AUDITWHY_SIC_LEAF_POLICY (primary_leaf | peer_majority)."""
+    policy = os.getenv("AUDITWHY_SIC_LEAF_POLICY", "primary_leaf").strip().lower()
+    return policy if policy in LEAF_POLICIES else "primary_leaf"
 
 
 def is_valid_sic_code(code: Any) -> bool:
@@ -35,23 +45,30 @@ def choose_reconciled_leaf(
     summary_code: str,
     children: List[Dict[str, Any]],
     peer_leaf_codes: List[str],
+    policy: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Pick the leaf a summary-coded filer is reconciled to.
 
-    Args:
-        summary_code: the non-leaf SIC the filer reported (e.g. "3570").
-        children: candidate leaf rows beneath it, sorted by code (see `leaf_children`).
-        peer_leaf_codes: leaf codes already used by the filer's peers in the same industry group,
-            available for a "follow the cohort" strategy.
+    Policies:
+      primary_leaf (default): the lowest-coded leaf. By SIC convention the "...1" leaf is the industry group's
+        primary line (3571 Electronic Computers under 3570), and the choice never depends on who else is in the
+        dataset, so the same filing reconciles identically in every run.
+      peer_majority: the leaf most used by the filer's industry-group peers, ties broken by code. Useful when a
+        cohort is dominated by one line of business, but it lets unrelated filers influence the mapping.
 
-    Returns the chosen child row, or None when the summary code cannot be reconciled.
+    Either way the filer stays inside its industry group, so group-level revenue and ARR totals are identical;
+    only the leaf-level attribution differs. Callers record the policy and all candidates for audit.
     """
     if not children:
         return None
-    # TODO(you): this is the reconciliation policy, and it changes reported numbers. The current default takes
-    # the first leaf (by SIC convention the "...1" leaf is the industry group's primary line: 3571 Electronic
-    # Computers under 3570). Alternatives: pick the leaf most common among `peer_leaf_codes`, or return None
-    # to roll the filer up at the industry-group level instead of drilling down to a leaf.
+    policy = policy or active_leaf_policy()
+    if policy == "peer_majority":
+        child_codes = {str(c["sic_code"]) for c in children}
+        counts = Counter(code for code in peer_leaf_codes if code in child_codes)
+        if counts:
+            best = max(counts.values())
+            winner = min(code for code, n in counts.items() if n == best)
+            return next(c for c in children if str(c["sic_code"]) == winner)
     return children[0]
 
 
@@ -76,7 +93,8 @@ def build_leaf_mapping(
                 for p in peers
                 if str(p.get("industry_group")) == group and p.get("leaf_sic_code")
             ]
-            chosen = choose_reconciled_leaf(code, children, peer_codes)
+            policy = active_leaf_policy()
+            chosen = choose_reconciled_leaf(code, children, peer_codes, policy=policy)
             if chosen is None:
                 continue
             entry = {
@@ -94,6 +112,7 @@ def build_leaf_mapping(
                     if part
                 ),
                 "candidates": [str(c["sic_code"]) for c in children],
+                "leaf_policy": policy,
                 "ciks": [],
             }
             mapping[code] = entry

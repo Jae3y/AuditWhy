@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 from pathlib import Path
+
+# Keep conformance traces out of the repository's logs/ (must be set before any app import).
+os.environ.setdefault("AUDITWHY_LOGS_DIR", tempfile.mkdtemp(prefix="auditwhy-conformance-"))
+os.environ["SAMPLE_MODE"] = "true"
+os.environ.setdefault("LOG_LEVEL", "CRITICAL")
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -21,6 +27,8 @@ from app.engines.hmem import HMemEngine, LowTrustOverwriteError, MemoryRecord
 from app.engines.markovian import ChunkConfig, MarkovianConfigError, MarkovianEngine
 from app.engines.scout_intent import ScoutContractError, ScoutIntentEngine
 from app.engines.world_model import WorldModelEngine, compute_entity_id
+from app.orchestration.graph import AuditWhyOrchestrator
+from app.schemas import RunRequest
 
 
 def main() -> None:
@@ -78,8 +86,8 @@ def main() -> None:
         assert "[STATE_CHECKPOINT]" not in cold_res["final_output"]
         assert "[TASK_COMPLETE]" not in cold_res["final_output"]
         print(
-            f"[PASS] Engine 2: Markovian (Bounds Check, Marker Stripping, Cold={cold_res['chunks_executed']} chunks "
-            f"vs Warm={warm_res['chunks_executed']} chunks, Efficiency={cold_res['efficiencyPercent']}%)"
+            f"[PASS] Engine 2: Markovian (Bounds Check, Marker Stripping, standalone default plan Cold={cold_res['chunks_executed']} "
+            f"/ Warm={warm_res['chunks_executed']} chunks, measured efficiency={cold_res['efficiencyPercent']}%)"
         )
 
         # 3. World Model Conformance
@@ -139,8 +147,23 @@ def main() -> None:
             f"SIC {dq_res['rows'][0]['invalid_sic_code']}, $62.753B FY25 Revenue)"
         )
 
+        # 7. Orchestrated investigation: data-driven verdicts and organic H-MEM compounding
+        orch = AuditWhyOrchestrator(hmem_engine=HMemEngine(ledger_path=tmp / "orch.jsonl"), persist_memory=False)
+        cold = orch.run(RunRequest(query="Why did Q3 retention drop in Computer & Office Equipment?")).model_dump()
+        warm = orch.run(RunRequest(query="Which Computer & Office Equipment accounts carry Q4 SLA risk?")).model_dump()
+        assert cold["zetaris_lineage"]["dq_revision_triggered"] and cold["zetaris_lineage"]["retriever_passes_executed"] == 2
+        assert warm["meterless_engines"]["hmem"]["memory_mode"] == "auto" and warm["meterless_engines"]["hmem"]["warm_mode_activated"]
+        assert warm["zetaris_lineage"]["retriever_passes_executed"] == 1
+        assert {h["hypothesis_id"]: h["status"] for h in cold["hypotheses"]}["H4"] == "blocked_untested"
+        assert all(e["status"] != "pending" for e in cold["hypotheses"])
+        print(
+            f"[PASS] Orchestration: cold run revised via DQ critique ({cold['zetaris_lineage']['retriever_passes_executed']} passes, "
+            f"{cold['meterless_engines']['markovian']['chunks_executed']} stages) -> unflagged follow-up compounded "
+            f"({warm['zetaris_lineage']['retriever_passes_executed']} pass, {warm['meterless_engines']['markovian']['chunks_executed']} stages)"
+        )
+
     print("=" * 78)
-    print("CONFORMANCE SUMMARY: 6/6 SUBSYSTEMS VERIFIED (100% COMPLIANT)")
+    print("CONFORMANCE SUMMARY: 7/7 SUBSYSTEMS VERIFIED (100% COMPLIANT)")
     print("=" * 78)
 
 

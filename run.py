@@ -14,6 +14,7 @@ import argparse
 import hmac
 import json
 import os
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict
 from urllib.parse import urlparse
@@ -259,16 +260,18 @@ def get_engines_telemetry() -> Dict[str, Any]:
     catalog = z_client.sample_engine.get_schema_catalog()
 
     def _tail_jsonl(filename: str, max_lines: int = 12) -> list:
+        """Stream the file keeping only the last `max_lines`: these logs are append-only and grow without bound."""
         p = LOGS_DIR / filename
         if not p.exists():
             return []
-        lines = [ln for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        with p.open("r", encoding="utf-8", errors="replace") as fh:
+            tail = deque((ln for ln in fh if ln.strip()), maxlen=max_lines)
         out = []
-        for ln in lines[-max_lines:]:
+        for ln in tail:
             try:
                 out.append(json.loads(ln))
-            except Exception:
-                pass
+            except json.JSONDecodeError:
+                continue
         return out
 
     return {

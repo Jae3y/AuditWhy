@@ -168,6 +168,18 @@ class TrustLedgerService:
         return entry
 
 
+def _locked(method):
+    """Run a MemoryStoreService method under the store's re-entrant lock."""
+
+    def wrapper(self, *args, **kwargs):
+        with self.lock:
+            return method(self, *args, **kwargs)
+
+    wrapper.__name__ = method.__name__
+    wrapper.__doc__ = method.__doc__
+    return wrapper
+
+
 class MemoryStoreService:
     """Manages CRUD operations, trust protection, and feedback adjustments on MemoryRecords."""
 
@@ -252,6 +264,7 @@ class MemoryStoreService:
         )
         return existing
 
+    @_locked
     def get(self, record_id: str, run_id: Optional[str] = None) -> Optional[MemoryRecord]:
         rec = self._records.get(record_id)
         if rec:
@@ -265,6 +278,7 @@ class MemoryStoreService:
             )
         return rec
 
+    @_locked
     def update(
         self,
         record_id: str,
@@ -310,6 +324,7 @@ class MemoryStoreService:
         )
         return existing
 
+    @_locked
     def delete(self, record_id: str, run_id: Optional[str] = None) -> bool:
         if record_id in self._records:
             del self._records[record_id]
@@ -317,6 +332,7 @@ class MemoryStoreService:
             return True
         return False
 
+    @_locked
     def apply_feedback(
         self,
         record_id: str,

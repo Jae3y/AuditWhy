@@ -203,7 +203,8 @@ class ScoutGuardAgent:
                     "ciks": list(rule.get("ciks") or []),
                     "record_id": item["record"]["id"],
                     "confidence": item["record"]["confidence"],
-                    "candidates": [rule["leaf_code"]],
+                    "candidates": list(rule.get("candidates") or [rule["leaf_code"]]),
+                    "leaf_policy": rule.get("leaf_policy", "hmem_learned_rule"),
                 }
             state.memory_context_str = "\n".join(
                 f"[H-MEM {item['record']['id']} score={item['score']:.3f} conf={item['record']['confidence']}]: {item['record']['content']}"
@@ -217,7 +218,7 @@ class ScoutGuardAgent:
             output_summary=(
                 f"Recalled {retrieved['total_matches']} record(s) above 0.35; {len(rules)} high-trust structured rule(s) "
                 f"{'applied' if state.warm_mode else 'not applied'}"
-                + (f": {', '.join(f'{c}->{r['leaf_code']}' for c, r in state.learned_sic_rules.items())}" if state.warm_mode else "")
+                + (": " + ", ".join(f"{c}->{r['leaf_code']}" for c, r in state.learned_sic_rules.items()) if state.warm_mode else "")
                 + (" (cold baseline requested)" if state.memory_mode == "cold" and rules else "")
                 + "."
             ),

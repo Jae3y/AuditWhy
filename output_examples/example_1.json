@@ -28,7 +28,7 @@
       ]
     },
     "primary_operational_driver": "In Computer & Office Equipment, Q3 P1 escalations went 13->88, led by v4.2_batch_connector_gateway_timeout, storage_telemetry_stream_backpressure, terminal_heartbeat_webhook_drop; p99 latency peaked at 2,140ms (INTERNATIONAL BUSINESS MACHINES CORP). Across all 10 accounts, timeout rate correlates with retention loss at r=0.962. $530K in SLA credits were issued; cohort NRR 86.99% (-$2.47M ARR).",
-    "primary_data_discrepancy_driver": "Zetaris DQ rule fk_sic_check shows INTERNATIONAL BUSINESS MACHINES CORP (CIK 0000051143) files under SEC SIC 3570, which is not a 4-digit leaf in company_dns.sic_codes. A naive inner join silently drops its $62.753B FY2025 revenue and -$730K Q3 ARR movement. Reconciled under Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers).",
+    "primary_data_discrepancy_driver": "Zetaris DQ rule fk_sic_check shows INTERNATIONAL BUSINESS MACHINES CORP (CIK 0000051143) files under SEC SIC 3570, which is not a 4-digit leaf in company_dns.sic_codes. A naive inner join silently drops its $62.753B FY2025 revenue and -$730K Q3 ARR movement. Reconciled under Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers). Leaf chosen by the primary_leaf policy among 3571, 3572, 3575, 3577, 3578, 3579; industry-group totals are the same whichever leaf is chosen.",
     "q4_forward_risk_driver": "Computer & Office Equipment carries $2.08M in Q4 weather SLA penalty exposure, led by IBM $620K in us-east-ny, CSCO $390K in us-east-nc, WDC $280K in us-west-ca.",
     "epistemological_boundary": "H4 (Enterprise Pricing-Tier & Rate-Card Change Impact) moved to untested_factors: Blocked by EvidenceEvaluatorAgent: `SELECT * FROM erp.pricing_tier_changes WHERE effective_quarter = '2026-Q3' LIMIT 50` -> No row-level provenance (pricing_tier_changes: TABLE_NOT_FOUND, 0 rows).; H_EXT (Competitor Contract Displacement / Bundling) moved to untested_factors: Blocked by EvidenceEvaluatorAgent: `SELECT * FROM crm.opportunity_loss_reasons WHERE fiscal_quarter = '2026-Q3' LIMIT 50` -> No row-level provenance (competitor_loss_reasons: TABLE_NOT_FOUND, 0 rows).",
     "llm_narrative": "",
@@ -66,6 +66,15 @@
         "reconciled_leaf_description": "Electronic Computers",
         "reconciled_hierarchy": "Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers)",
         "resolution_source": "dq_discovery",
+        "leaf_policy": "primary_leaf",
+        "leaf_candidates": [
+          "3571",
+          "3572",
+          "3575",
+          "3577",
+          "3578",
+          "3579"
+        ],
         "restored_fy2025_revenue_usd": 62753000000,
         "restored_q3_arr_usd": 4120000,
         "restored_q3_arr_delta_usd": -730000,
@@ -206,11 +215,20 @@
         "edgar_reported_sic": "3570",
         "reconciled_leaf_sic": "3571",
         "resolution_source": "dq_discovery",
+        "leaf_policy": "primary_leaf",
+        "leaf_candidates": [
+          "3571",
+          "3572",
+          "3575",
+          "3577",
+          "3578",
+          "3579"
+        ],
         "restored_fy2025_revenue_usd": 62753000000,
         "restored_q3_arr_usd": 4120000,
         "q3_arr_delta_usd": -730000
       },
-      "explanation": "Zetaris DQ rule fk_sic_check shows INTERNATIONAL BUSINESS MACHINES CORP (CIK 0000051143) files under SEC SIC 3570, which is not a 4-digit leaf in company_dns.sic_codes. A naive inner join silently drops its $62.753B FY2025 revenue and -$730K Q3 ARR movement. Reconciled under Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers)."
+      "explanation": "Zetaris DQ rule fk_sic_check shows INTERNATIONAL BUSINESS MACHINES CORP (CIK 0000051143) files under SEC SIC 3570, which is not a 4-digit leaf in company_dns.sic_codes. A naive inner join silently drops its $62.753B FY2025 revenue and -$730K Q3 ARR movement. Reconciled under Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers). Leaf chosen by the primary_leaf policy among 3571, 3572, 3575, 3577, 3578, 3579; industry-group totals are the same whichever leaf is chosen."
     },
     {
       "finding_id": "F3_Q4_REGIONAL_WEATHER_SLA_EXPOSURE",
@@ -987,8 +1005,8 @@
         "content": "Reconciliation Rule [SIC-3570-LEAF]: SEC EDGAR CIK 0000051143 (IBM) reports summary SIC code 3570. Map 3570 -> Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers) to prevent dropping $62.753B FY2025 revenue in Zetaris USL joins.",
         "type": "procedural",
         "layer": "long_term",
-        "timestamp": "2026-10-24T21:45:45.002003Z",
-        "lastAccessed": "2026-10-24T21:45:45.002003Z",
+        "timestamp": "2026-10-25T07:13:37.867689Z",
+        "lastAccessed": "2026-10-25T07:13:37.867689Z",
         "accessCount": 0,
         "tags": [
           "zetaris",
@@ -1022,7 +1040,7 @@
         "source": "zetaris_usl_dq:fk_sic_check",
         "provenance": {
           "origin": "zetaris_usl_dq:fk_sic_check",
-          "learnedAt": "2026-10-24T21:45:45.002003Z",
+          "learnedAt": "2026-10-25T07:13:37.867689Z",
           "label": "procedural:taxonomy",
           "rule": {
             "rule_type": "sic_summary_to_leaf",
@@ -1030,6 +1048,15 @@
             "leaf_code": "3571",
             "leaf_description": "Electronic Computers",
             "hierarchy": "Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers)",
+            "leaf_policy": "primary_leaf",
+            "candidates": [
+              "3571",
+              "3572",
+              "3575",
+              "3577",
+              "3578",
+              "3579"
+            ],
             "ciks": [
               "0000051143"
             ],
@@ -1060,8 +1087,8 @@
           "content": "Reconciliation Rule [SIC-3570-LEAF]: SEC EDGAR CIK 0000051143 (IBM) reports summary SIC code 3570. Map 3570 -> Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers) to prevent dropping $62.753B FY2025 revenue in Zetaris USL joins.",
           "type": "procedural",
           "layer": "long_term",
-          "timestamp": "2026-10-24T21:45:45.002003Z",
-          "lastAccessed": "2026-10-24T21:45:45.002003Z",
+          "timestamp": "2026-10-25T07:13:37.867689Z",
+          "lastAccessed": "2026-10-25T07:13:37.867689Z",
           "accessCount": 0,
           "tags": [
             "zetaris",
@@ -1095,7 +1122,7 @@
           "source": "zetaris_usl_dq:fk_sic_check",
           "provenance": {
             "origin": "zetaris_usl_dq:fk_sic_check",
-            "learnedAt": "2026-10-24T21:45:45.002003Z",
+            "learnedAt": "2026-10-25T07:13:37.867689Z",
             "label": "procedural:taxonomy",
             "rule": {
               "rule_type": "sic_summary_to_leaf",
@@ -1103,6 +1130,15 @@
               "leaf_code": "3571",
               "leaf_description": "Electronic Computers",
               "hierarchy": "Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers)",
+              "leaf_policy": "primary_leaf",
+              "candidates": [
+                "3571",
+                "3572",
+                "3575",
+                "3577",
+                "3578",
+                "3579"
+              ],
               "ciks": [
                 "0000051143"
               ],
@@ -1216,7 +1252,7 @@
       "score": 0.938,
       "intent": "enterprise_discrepancy_investigation",
       "contract": {
-        "contract_id": "sct-7edc72d7187a",
+        "contract_id": "sct-f37c0188ecce",
         "run_id": "example-1-cold-investigation",
         "intent": "enterprise_discrepancy_investigation",
         "allowed_tools": [
@@ -1254,10 +1290,10 @@
           }
         },
         "score": 0.938,
-        "issued_at": 1792878344,
-        "expires_at": 1792878644,
+        "issued_at": 1792912417,
+        "expires_at": 1792912717,
         "signedBy": "scout",
-        "signature": "2402b9686e6aacc990f5c400cb765e5f1f089aae1eebdc8356ca751c16c382b2"
+        "signature": "1ffa29adee625fc8e9bbda615e71e2ec0aebe51de8852091dabee439ade53913"
       }
     }
   },
@@ -1379,13 +1415,13 @@
   },
   "trace_events": [
     {
-      "timestamp": "2026-10-24T21:45:44.916003Z",
+      "timestamp": "2026-10-25T07:13:37.793802Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-6de255f2339b",
+      "trace_id": "trc-411812b0dd26",
       "agent_name": "ScoutGuardAgent",
       "action": "issue_signed_execution_contract",
       "input_summary": "Query passed 5-layer guard (score=0.938): Why did Q3 enterprise retention drop across our Computer & Office Equipment accounts, and how do SEC EDGAR revenues comp",
-      "output_summary": "Issued HMAC-SHA256 ExecutionContract id=sct-7edc72d7187a signedBy=scout TTL=300s tools=['query_zetaris', 'verify_dq', 'write_memory', 'read_memory', 'analyze_world_model']",
+      "output_summary": "Issued HMAC-SHA256 ExecutionContract id=sct-f37c0188ecce signedBy=scout TTL=300s tools=['query_zetaris', 'verify_dq', 'write_memory', 'read_memory', 'analyze_world_model']",
       "target_agent": "PlannerAgent",
       "confidence": 0.938,
       "retry_count": 0,
@@ -1393,9 +1429,9 @@
       "sponsor_tech": "meterless_scout"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.918994Z",
+      "timestamp": "2026-10-25T07:13:37.797810Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-b7cb815b908f",
+      "trace_id": "trc-d5fd5083fa11",
       "agent_name": "ScoutGuardAgent",
       "action": "retrieve_hmem_context",
       "input_summary": "8-factor H-MEM recall for 'Why did Q3 enterprise retention drop across our Computer & Office Equipment accounts, and ' (memory_mode=cold, fixture_seeded=False)",
@@ -1407,9 +1443,9 @@
       "sponsor_tech": "meterless_hmem"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.922089Z",
+      "timestamp": "2026-10-25T07:13:37.799982Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-54c7edf55233",
+      "trace_id": "trc-38df8e639427",
       "agent_name": "PlannerAgent",
       "action": "decompose_hypotheses",
       "input_summary": "Decomposing query into 4 hypotheses (memory_mode=cold, warm=False)",
@@ -1421,9 +1457,9 @@
       "sponsor_tech": "nvidia_nemotron"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.928234Z",
+      "timestamp": "2026-10-25T07:13:37.805461Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-90b2fccb8c90",
+      "trace_id": "trc-0e3e5e4ef9b0",
       "agent_name": "DataRetrieverAgent",
       "action": "query_zetaris_pass_1",
       "input_summary": "Executed 6 planned Zetaris queries (H-MEM rules applied to EDGAR x SIC join: none)",
@@ -1435,9 +1471,9 @@
       "sponsor_tech": "zetaris"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.956018Z",
+      "timestamp": "2026-10-25T07:13:37.830138Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-6190ad460cc3",
+      "trace_id": "trc-9db241c94d69",
       "agent_name": "DataRetrieverAgent",
       "action": "ingest_world_model_pass_1",
       "input_summary": "Grounded EDGAR, billing and support rows as enterprise_account observations (6-stage pipeline)",
@@ -1449,9 +1485,9 @@
       "sponsor_tech": "meterless_world_model"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.958468Z",
+      "timestamp": "2026-10-25T07:13:37.832138Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-d890f9ba3d69",
+      "trace_id": "trc-79a8ccc685ba",
       "agent_name": "EvidenceEvaluatorAgent",
       "action": "detect_zetaris_dq_orphan",
       "input_summary": "Ran `SHOW DQ ALL INVALID TABLE lightning.metastore.usl_demo.sic_edgar_usl` against 9 joined filings (retriever pass 1)",
@@ -1463,9 +1499,9 @@
       "sponsor_tech": "zetaris"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.960504Z",
+      "timestamp": "2026-10-25T07:13:37.835325Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-9fe46cf64546",
+      "trace_id": "trc-5f89f34a65bd",
       "agent_name": "PlannerAgent",
       "action": "revise_investigation_plan",
       "input_summary": "Evaluator critique: fk_sic_check flagged 1 orphan(s); 1 missing from the EDGAR x SIC join (IBM (CIK 0000051143) reports summary SIC 3570, $62.753B FY2025 revenue). Naive join understates cohort revenue by $62.753B.",
@@ -1477,9 +1513,9 @@
       "sponsor_tech": "nvidia_nemotron"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.963502Z",
+      "timestamp": "2026-10-25T07:13:37.837376Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-0fb552895c2f",
+      "trace_id": "trc-69fd55ad40b2",
       "agent_name": "DataRetrieverAgent",
       "action": "recover_sic_hierarchy_pass_2",
       "input_summary": "Expanded summary SIC code(s) ['3570'] through company_dns.sic_codes leaves and re-ran the EDGAR x SIC join",
@@ -1491,9 +1527,9 @@
       "sponsor_tech": "zetaris"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.972161Z",
+      "timestamp": "2026-10-25T07:13:37.844355Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-39f4f4bff76d",
+      "trace_id": "trc-7a23d5174334",
       "agent_name": "DataRetrieverAgent",
       "action": "ingest_world_model_pass_2",
       "input_summary": "Grounded reconciled filings and US SIC V4 leaf taxonomy in the World Model",
@@ -1505,9 +1541,9 @@
       "sponsor_tech": "meterless_world_model"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.974592Z",
+      "timestamp": "2026-10-25T07:13:37.846377Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-0aee27ce1996",
+      "trace_id": "trc-ccb0f20ab900",
       "agent_name": "EvidenceEvaluatorAgent",
       "action": "verify_dq_reconciliation",
       "input_summary": "Ran `SHOW DQ ALL INVALID TABLE lightning.metastore.usl_demo.sic_edgar_usl` against 10 joined filings (retriever pass 2)",
@@ -1519,9 +1555,9 @@
       "sponsor_tech": "zetaris"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.987200Z",
+      "timestamp": "2026-10-25T07:13:37.857406Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-aaa4c046bf6d",
+      "trace_id": "trc-c7d0a4cb8547",
       "agent_name": "MarkovianAnalystAgent",
       "action": "run_markovian_bounded_analysis",
       "input_summary": "Ran 4 bounded chunk(s) [cohort_scan, taxonomy_reconciliation, operational_correlation, candidate_synthesis] over 10 World Model accounts (focus: Computer & Office Equipment; memory seam=False)",
@@ -1533,9 +1569,9 @@
       "sponsor_tech": "meterless_markovian"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.990821Z",
+      "timestamp": "2026-10-25T07:13:37.858389Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-1cf3038c7773",
+      "trace_id": "trc-893c92f303d8",
       "agent_name": "EvidenceEvaluatorAgent",
       "action": "flag_unsupported_claim",
       "input_summary": "Audited 6 MarkovianAnalystAgent claims against the evidence ledger (10 Zetaris queries)",
@@ -1547,9 +1583,9 @@
       "sponsor_tech": "nvidia_nemotron"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.992816Z",
+      "timestamp": "2026-10-25T07:13:37.859389Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-6cc4ec796685",
+      "trace_id": "trc-840f663b34e2",
       "agent_name": "MarkovianAnalystAgent",
       "action": "strip_unverified_claim_and_finalize_findings",
       "input_summary": "Applied EvidenceEvaluatorAgent verdicts to 6 candidate claims",
@@ -1561,9 +1597,9 @@
       "sponsor_tech": "meterless_markovian"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.994043Z",
+      "timestamp": "2026-10-25T07:13:37.861387Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-5bcd06f7fd19",
+      "trace_id": "trc-06a8fcb81fcf",
       "agent_name": "ExplanationWriterAgent",
       "action": "draft_executive_explanation",
       "input_summary": "Synthesizing narrative from 3 verified finding(s), 2 untested factor(s) and 10 lineage entries",
@@ -1575,9 +1611,9 @@
       "sponsor_tech": "nvidia_nemotron"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.996386Z",
+      "timestamp": "2026-10-25T07:13:37.862924Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-954f8881a6ce",
+      "trace_id": "trc-327ee28c7d65",
       "agent_name": "FinalReviewerAgent",
       "action": "enforce_epistemological_caveat",
       "input_summary": "Audited draft for causal discipline, caveat coverage and finding provenance",
@@ -1589,9 +1625,9 @@
       "sponsor_tech": "nvidia_nemotron"
     },
     {
-      "timestamp": "2026-10-24T21:45:44.998610Z",
+      "timestamp": "2026-10-25T07:13:37.864507Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-0a98c74f01b3",
+      "trace_id": "trc-7e7fc3818434",
       "agent_name": "ExplanationWriterAgent",
       "action": "revise_explanation_with_caveat",
       "input_summary": "Addressing 1 FinalReviewerAgent issue(s): missing_caveat_coverage",
@@ -1603,9 +1639,9 @@
       "sponsor_tech": "nvidia_nemotron"
     },
     {
-      "timestamp": "2026-10-24T21:45:45.000711Z",
+      "timestamp": "2026-10-25T07:13:37.865529Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-60ff32acebc9",
+      "trace_id": "trc-d6e826b5cb95",
       "agent_name": "FinalReviewerAgent",
       "action": "approve_final_explanation",
       "input_summary": "Re-audited revised draft against all three gates",
@@ -1617,9 +1653,9 @@
       "sponsor_tech": "nvidia_nemotron"
     },
     {
-      "timestamp": "2026-10-24T21:45:45.012513Z",
+      "timestamp": "2026-10-25T07:13:37.875139Z",
       "run_id": "example-1-cold-investigation",
-      "trace_id": "trc-b4abe5f4c5ab",
+      "trace_id": "trc-45697b657ceb",
       "agent_name": "FinalReviewerAgent",
       "action": "mine_rule_into_hmem_and_sleep_preview",
       "input_summary": "Mining 1 reconciliation(s) into H-MEM long_term and running SleepCycleService.preview()",
@@ -1632,5 +1668,5 @@
     }
   ],
   "confidence": 0.883,
-  "duration_ms": 123.94
+  "duration_ms": 100.73
 }

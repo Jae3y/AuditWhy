@@ -311,6 +311,28 @@
         <div id="hypotheses-panel" style="font-size: 0.86rem;">No investigation executed yet.</div>
       </div>
 
+      <div class="card" style="margin-bottom: 20px;">
+        <h2>Evidence Ledger (every Zetaris statement, which hypothesis it served, and whether it returned rows)</h2>
+        <div style="overflow-x:auto;">
+          <table class="trace-table">
+            <thead>
+              <tr>
+                <th>Pass</th>
+                <th>Agent</th>
+                <th>Purpose</th>
+                <th>Hypotheses</th>
+                <th>Status</th>
+                <th>Rows</th>
+                <th>SQL</th>
+              </tr>
+            </thead>
+            <tbody id="ledger-body">
+              <tr><td colspan="7" style="color:var(--muted);">Run an investigation to populate the evidence ledger.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="card">
         <h2>Live Multi-Agent Collaboration Trace (`logs/agent_trace.jsonl`)</h2>
         <table class="trace-table">
@@ -597,6 +619,24 @@
         `<div style="margin-bottom:6px; color:var(--amber);">UNTESTED ${esc(u.hypothesis_id)}: ${esc(u.title)} &mdash; needs ${esc(u.required_data_to_test)}</div>`
       ).join("");
       document.getElementById("hypotheses-panel").innerHTML = (hyps + untested) || `<span style="color:var(--red)">${data.status === "blocked" ? "Execution halted by Scout Intent 5-Layer Security Guard before hypothesis execution." : esc(data.executive_summary)}</span>`;
+
+      const ledger = data.evidence_ledger || [];
+      document.getElementById("ledger-body").innerHTML = ledger.length
+        ? ledger.map(e => {
+            const empty = Number(e.row_count || 0) === 0 && e.purpose !== "dq_fk_sic_check";
+            const st = e.status === "SUCCESS" ? (empty ? "partial_success" : "success") : "blocked";
+            return `
+          <tr>
+            <td>${esc(e.pass)}</td>
+            <td>${esc(e.agent)}</td>
+            <td><code>${esc(e.purpose)}</code></td>
+            <td>${esc((e.hypotheses || []).join(", ") || "confounder")}</td>
+            <td><span class="status-pill st-${st}">${esc(e.status)}</span></td>
+            <td>${esc(e.row_count)}</td>
+            <td><code style="font-size:0.72rem;">${esc(e.sql)}</code></td>
+          </tr>`;
+          }).join("")
+        : `<tr><td colspan="7" style="color:var(--muted);">${data.status === "blocked" ? "No statements executed (blocked before any tool contract was issued)." : "No evidence recorded."}</td></tr>`;
 
       const tbody = document.getElementById("trace-body");
       tbody.innerHTML = (data.trace_events || []).map((ev, idx) => `

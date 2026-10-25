@@ -128,6 +128,8 @@ class MarkovianAnalystAgent:
                     "reconciled_leaf_description": rule.get("leaf_description") if rule else None,
                     "reconciled_hierarchy": rule.get("hierarchy") if rule else None,
                     "resolution_source": rule.get("source") if rule else None,
+                    "leaf_policy": (rule.get("leaf_policy") or ("hmem_learned_rule" if rule.get("source") == "hmem" else None)) if rule else None,
+                    "leaf_candidates": rule.get("candidates", []) if rule else [],
                     "restored_fy2025_revenue_usd": int(o.get("revenue_2025") or 0),
                     "restored_q3_arr_usd": int(_num(acc, "q3_arr_usd")),
                     "restored_q3_arr_delta_usd": int(_num(acc, "q3_arr_delta_usd")),
@@ -494,6 +496,8 @@ class MarkovianAnalystAgent:
                             "edgar_reported_sic": o["edgar_sic_code"],
                             "reconciled_leaf_sic": o["reconciled_leaf_sic_code"],
                             "resolution_source": o["resolution_source"],
+                            "leaf_policy": o["leaf_policy"],
+                            "leaf_candidates": o["leaf_candidates"],
                             "restored_fy2025_revenue_usd": o["restored_fy2025_revenue_usd"],
                             "restored_q3_arr_usd": o["restored_q3_arr_usd"],
                             "q3_arr_delta_usd": o["restored_q3_arr_delta_usd"],
@@ -503,6 +507,12 @@ class MarkovianAnalystAgent:
                             f"{o['edgar_sic_code']}, which is not a 4-digit leaf in company_dns.sic_codes. A naive inner join "
                             f"silently drops its {fmt_usd(o['restored_fy2025_revenue_usd'])} FY2025 revenue and "
                             f"{fmt_usd(o['restored_q3_arr_delta_usd'])} Q3 ARR movement. Reconciled under {o['reconciled_hierarchy']}."
+                            + (
+                                f" Leaf chosen by the {o['leaf_policy']} policy among {', '.join(o['leaf_candidates'])}; "
+                                "industry-group totals are the same whichever leaf is chosen."
+                                if len(o["leaf_candidates"]) > 1
+                                else ""
+                            )
                         ),
                     }
                 )

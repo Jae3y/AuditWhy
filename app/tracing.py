@@ -8,7 +8,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
-from app.config import LOGS_DIR, redact_sensitive_text, safe_identifier
+from app.config import LOGS_DIR, redact_sensitive_text, safe_identifier, settings
+
+# Statuses that still reach stdout when LOG_LEVEL is WARNING/ERROR (the JSONL files always get every event).
+_NOTABLE_STATUSES = {"needs_revision", "partial_success", "fallback", "blocked"}
 from app.schemas import SponsorTech, TraceEvent, TraceStatus
 
 
@@ -63,9 +66,12 @@ class TraceLogger:
         with self.run_trace_path.open("a", encoding="utf-8") as rf:
             rf.write(serialized + "\n")
 
-        print(
-            f"[INFO] run_id={self.run_id} agent={agent_name} action={action} "
-            f"status={status} target={target_agent} confidence={clamped_conf:.2f} "
-            f"retry={retry_count} sponsor={sponsor_tech}"
-        )
+        level = settings.log_level
+        notable = status in _NOTABLE_STATUSES
+        if level in ("DEBUG", "INFO") or (level == "WARNING" and notable) or (level == "ERROR" and status in ("fallback", "blocked")):
+            print(
+                f"[{'WARN' if notable else 'INFO'}] run_id={self.run_id} agent={agent_name} action={action} "
+                f"status={status} target={target_agent} confidence={clamped_conf:.2f} "
+                f"retry={retry_count} sponsor={sponsor_tech}"
+            )
         return event

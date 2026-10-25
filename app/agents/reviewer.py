@@ -165,6 +165,8 @@ class FinalReviewerAgent:
                     "leaf_code": entry["leaf_code"],
                     "leaf_description": entry.get("leaf_description", ""),
                     "hierarchy": entry.get("hierarchy", ""),
+                    "leaf_policy": entry.get("leaf_policy", "hmem_learned_rule"),
+                    "candidates": entry.get("candidates", [entry["leaf_code"]]),
                     "ciks": entry.get("ciks") or [cik],
                     "restored_revenue_usd": revenue,
                     "verified_by": "fk_sic_check re-run after reconciliation",

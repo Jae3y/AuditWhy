@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from app.adapters.sample_data import SampleZetarisEngine, get_shared_sample_engine
 from app.config import settings
@@ -20,6 +20,42 @@ READ_ONLY_STATEMENT = re.compile(r"^\s*(?:SELECT|WITH|SHOW|EXPLAIN|DESCRIBE)\b",
 
 class ZetarisSQLValidationError(ValueError):
     """Raised when a query violates Zetaris Lightning SQL single-statement rules."""
+
+
+_CATALOG_MISS = re.compile(r"(table or view not found|no such table|does not exist|cannot resolve|not found in database)", re.I)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """Retry transport failures and 5xx/429; a 4xx is the server's final answer and retrying cannot change it."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500 or exc.response.status_code == 429
+    return isinstance(exc, httpx.TransportError)
+
+
+def normalize_zetaris_rows(data: Any) -> List[Dict[str, Any]]:
+    """Coerce the result shapes Zetaris REST can return into a list of row dicts.
+
+    Handles `{"rows": [{...}]}`, `{"data": [{...}]}`, columnar `{"columns": [...], "data"|"rows": [[...]]}` (with
+    columns as names or `{"name": ...}` objects), the same nested under `result`, and a bare list.
+    """
+    if isinstance(data, dict) and isinstance(data.get("result"), (dict, list)):
+        data = data["result"]
+    if isinstance(data, list):
+        return [r for r in data if isinstance(r, dict)]
+    if not isinstance(data, dict):
+        return []
+    rows = data.get("rows", data.get("data", data.get("records", [])))
+    if not isinstance(rows, list):
+        return []
+    columns = data.get("columns") or data.get("schema") or []
+    names = [c.get("name") or c.get("columnName") if isinstance(c, dict) else str(c) for c in columns]
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        if isinstance(row, dict):
+            out.append(row)
+        elif isinstance(row, (list, tuple)) and names:
+            out.append(dict(zip(names, row)))
+    return out
 
 
 def assert_read_only_sql(sql: str) -> None:
@@ -86,8 +122,16 @@ class ZetarisClient:
         self.trace_logger = trace_logger
         self.sample_engine = sample_engine or get_shared_sample_engine(sample_dir)
         self.executed_queries: List[Dict[str, Any]] = []
+        # Circuit breaker: once live Zetaris is unreachable, the rest of the run goes straight to the mirror
+        # instead of paying 3 retries with backoff on every remaining query.
+        self.live_unavailable_reason: Optional[str] = None
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=8), reraise=True)
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(min=1, max=8),
+        retry=retry_if_exception(_is_transient),
+        reraise=True,
+    )
     def _post_live_sql(self, cleaned_sql: str, limit: int) -> Dict[str, Any]:
         endpoint = f"{self.rest_url}/sql-editor/sqls/run"
         headers = {
@@ -104,15 +148,28 @@ class ZetarisClient:
         }
         with httpx.Client(timeout=20.0) as client:
             resp = client.post(endpoint, headers=headers, json=payload)
+            if 400 <= resp.status_code < 500 and _CATALOG_MISS.search(resp.text):
+                missing = re.findall(r"\b(?:FROM|JOIN)\s+([A-Za-z_][\w.]*)", cleaned_sql, re.I)
+                return {
+                    "status": "TABLE_NOT_FOUND",
+                    "execution_engine": "ZetarisLightningREST",
+                    "sql": cleaned_sql,
+                    "missing_tables": missing,
+                    "columns": [],
+                    "row_count": 0,
+                    "rows": [],
+                    "note": resp.text[:300],
+                }
             resp.raise_for_status()
             data = resp.json()
+            rows = normalize_zetaris_rows(data)
             return {
                 "status": "SUCCESS",
                 "execution_engine": "ZetarisLightningREST",
                 "sql": cleaned_sql,
-                "row_count": len(data.get("rows", data.get("data", []))),
-                "rows": data.get("rows", data.get("data", [])),
-                "raw": data,
+                "columns": list(rows[0].keys()) if rows else [],
+                "row_count": len(rows),
+                "rows": rows,
             }
 
     def run_sql(
@@ -133,20 +190,24 @@ class ZetarisClient:
         if read_only:
             assert_read_only_sql(cleaned_sql)
 
-        if not self.sample_mode and self.api_key:
+        if not self.sample_mode and self.api_key and self.live_unavailable_reason is None:
             try:
                 res = self._post_live_sql(cleaned_sql, limit)
                 self.executed_queries.append(
                     {"sql": cleaned_sql, "mode": "live_zetaris", "status": res["status"], "row_count": res["row_count"]}
                 )
                 return res
-            except Exception as exc:
+            except (httpx.HTTPError, ValueError) as exc:  # transport, HTTP status, or non-JSON body
+                self.live_unavailable_reason = type(exc).__name__
                 if self.trace_logger is not None:
                     self.trace_logger.log(
                         agent_name=agent_name,
                         action="fallback_to_sample_data",
-                        input_summary=f"Live Zetaris unreachable ({type(exc).__name__}); falling back to SampleZetarisEngine for SQL: {cleaned_sql[:90]}",
-                        output_summary="Switched execution to deterministic SampleZetarisEngine over data/sample/",
+                        input_summary=f"Live Zetaris failed ({type(exc).__name__}) on SQL: {cleaned_sql[:90]}",
+                        output_summary=(
+                            "Circuit opened: this and all remaining queries in the run execute on the deterministic "
+                            "SampleZetarisEngine over data/sample/."
+                        ),
                         target_agent=agent_name,
                         confidence=0.95,
                         retry_count=1,

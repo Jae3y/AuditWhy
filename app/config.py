@@ -140,6 +140,11 @@ class Settings:
         return os.getenv("SCOUT_HMAC_KEY", "").strip() or _EPHEMERAL_SCOUT_KEY
 
     @property
+    def log_level(self) -> str:
+        level = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+        return level if level in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL") else "INFO"
+
+    @property
     def scout_rate_limit_per_minute(self) -> int:
         try:
             return max(1, int(os.getenv("SCOUT_RATE_LIMIT_PER_MINUTE", "120")))
