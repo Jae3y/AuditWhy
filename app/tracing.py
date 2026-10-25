@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
-from app.config import LOGS_DIR, redact_sensitive_text
+from app.config import LOGS_DIR, redact_sensitive_text, safe_identifier
 from app.schemas import SponsorTech, TraceEvent, TraceStatus
 
 
@@ -20,7 +20,7 @@ class TraceLogger:
         self.logs_dir = logs_dir or LOGS_DIR
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.global_trace_path = self.logs_dir / "agent_trace.jsonl"
-        self.run_trace_path = self.logs_dir / f"trace-{run_id}.jsonl"
+        self.run_trace_path = self.logs_dir / f"trace-{safe_identifier(run_id)}.jsonl"
         self.events: List[TraceEvent] = []
 
     def log(

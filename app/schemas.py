@@ -6,7 +6,9 @@ import uuid
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
-from app.config import settings
+from app.config import safe_identifier, settings
+
+MemoryMode = Literal["auto", "cold", "warm"]
 
 
 TraceStatus = Literal[
@@ -58,11 +60,28 @@ class RunRequest(BaseModel):
     sample_mode: Optional[bool] = None
 
     def effective_run_id(self) -> str:
-        return (
-            self.run_id
-            or self.request_id
-            or f"run-{uuid.uuid4().hex[:10]}"
-        )
+        raw = self.run_id or self.request_id
+        return safe_identifier(raw) if raw else f"run-{uuid.uuid4().hex[:10]}"
+
+    def effective_memory_mode(self) -> MemoryMode:
+        """Map `warm_memory_seed` onto an H-MEM policy.
+
+        true  -> "warm": seed the reconciliation rule if absent, then apply recalled rules.
+        false -> "cold": recall for telemetry only; force the full discovery path (demo baseline).
+        unset -> "auto": apply any recalled high-trust rule, which is how compounding happens organically.
+        """
+        flag = self.effective_context().get("warm_memory_seed")
+        if flag is True:
+            return "warm"
+        if flag is False:
+            return "cold"
+        return "auto"
+
+    def effective_max_retries(self) -> int:
+        try:
+            return max(0, min(5, int(self.effective_context().get("max_retries", 2))))
+        except (TypeError, ValueError):
+            return 2
 
     def effective_query(self) -> str:
         if self.user_query and self.user_query.strip():
@@ -125,7 +144,14 @@ class HypothesisItem(BaseModel):
     hypothesis_id: str
     title: str
     description: str
-    status: Literal["verified", "reconciled_after_dq_fix", "blocked_untested", "refuted"]
+    status: Literal[
+        "pending",
+        "verified",
+        "reconciled_after_dq_fix",
+        "inconclusive",
+        "blocked_untested",
+        "refuted",
+    ]
     confidence: float
     evidence_tables: List[str]
     sql_queries: List[str]
@@ -157,6 +183,7 @@ class RunResponse(BaseModel):
     untested_factors: List[Dict[str, Any]]
     correlation_vs_causation_caveat: str
     recommended_actions: List[Dict[str, Any]]
+    evidence_ledger: List[Dict[str, Any]] = Field(default_factory=list)
     zetaris_lineage: Dict[str, Any]
     meterless_engines: Dict[str, Any]
     provider_routing: Dict[str, Any]

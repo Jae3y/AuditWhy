@@ -16,6 +16,8 @@ import hashlib
 import json
 import math
 import re
+import sys
+import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -172,29 +174,33 @@ class MemoryStoreService:
     def __init__(self, ledger: TrustLedgerService) -> None:
         self.ledger = ledger
         self._records: Dict[str, MemoryRecord] = {}
+        # FastAPI runs sync endpoints on a thread pool, so concurrent runs share this store.
+        self.lock = threading.RLock()
+
+    def _guard_trust(self, existing: MemoryRecord, incoming_conf: float, incoming_source: str, run_id: Optional[str]) -> None:
+        if existing.confidence >= 0.85 and incoming_conf < 0.50:
+            self.ledger.append(
+                "update",
+                existing.id,
+                {
+                    "status": "blocked_by_trust_protection",
+                    "existing_confidence": existing.confidence,
+                    "incoming_confidence": incoming_conf,
+                    "incoming_source": incoming_source,
+                },
+                run_id=run_id,
+            )
+            raise LowTrustOverwriteError(
+                f"Trust protection violation: low-trust source ({incoming_conf:.2f} < 0.50) "
+                f"cannot overwrite high-trust record '{existing.id}' ({existing.confidence:.2f} >= 0.85)."
+            )
 
     def create(self, record: MemoryRecord | Dict[str, Any]) -> MemoryRecord:
         rec = record if isinstance(record, MemoryRecord) else MemoryRecord(**record)
-        # Check if overwriting an existing record ID
-        if rec.id in self._records:
-            existing = self._records[rec.id]
-            if existing.confidence >= 0.85 and rec.confidence < 0.50:
-                self.ledger.append(
-                    "update",
-                    rec.id,
-                    {
-                        "status": "blocked_by_trust_protection",
-                        "existing_confidence": existing.confidence,
-                        "incoming_confidence": rec.confidence,
-                        "incoming_source": rec.source,
-                    },
-                    run_id=rec.runId,
-                )
-                raise LowTrustOverwriteError(
-                    f"Trust protection violation: low-trust source ({rec.confidence:.2f} < 0.50) "
-                    f"cannot overwrite high-trust record '{rec.id}' ({existing.confidence:.2f} >= 0.85)."
-                )
-        self._records[rec.id] = rec
+        with self.lock:
+            if rec.id in self._records:
+                self._guard_trust(self._records[rec.id], rec.confidence, rec.source, rec.runId)
+            self._records[rec.id] = rec
         self.ledger.append(
             "create",
             rec.id,
@@ -208,6 +214,43 @@ class MemoryStoreService:
             run_id=rec.runId,
         )
         return rec
+
+    def reinforce(self, record: MemoryRecord) -> MemoryRecord:
+        """Re-observing a known fact strengthens the stored record instead of resetting it.
+
+        Keeps the higher confidence (so earned `helpful` feedback is not wiped), preserves access history,
+        refreshes content/provenance from the new observation, and counts the re-confirmation.
+        """
+        with self.lock:
+            existing = self._records.get(record.id)
+            if existing is None:
+                return self.create(record)
+            self._guard_trust(existing, record.confidence, record.source, record.runId)
+            prev_conf = existing.confidence
+            existing.content = record.content
+            existing.tags = list(dict.fromkeys(existing.tags + record.tags))
+            existing.entities = list(dict.fromkeys(existing.entities + record.entities))[:10]
+            existing.confidence = max(existing.confidence, record.confidence)
+            existing.lastAccessed = _utc_now_iso()
+            existing.runId = record.runId
+            reinforcements = int(existing.provenance.get("reinforcements", 0)) + 1
+            existing.provenance = {**existing.provenance, **record.provenance, "reinforcements": reinforcements}
+            existing.embedding = compute_deterministic_embedding(
+                f"{existing.content} {' '.join(existing.tags)} {' '.join(existing.entities)} {existing.domain}"
+            )
+        self.ledger.append(
+            "update",
+            record.id,
+            {
+                "status": "reinforced",
+                "source": record.source,
+                "previous_confidence": prev_conf,
+                "confidence": existing.confidence,
+                "reinforcements": reinforcements,
+            },
+            run_id=record.runId,
+        )
+        return existing
 
     def get(self, record_id: str, run_id: Optional[str] = None) -> Optional[MemoryRecord]:
         rec = self._records.get(record_id)
@@ -313,7 +356,19 @@ class MemoryStoreService:
         return rec
 
     def all_records(self) -> List[MemoryRecord]:
-        return list(self._records.values())
+        with self.lock:
+            return list(self._records.values())
+
+    def active_rules(self, rule_type: str, min_confidence: float = 0.85) -> List[MemoryRecord]:
+        """High-trust, non-superseded, non-flagged records carrying a structured rule of `rule_type`."""
+        return [
+            r
+            for r in self.all_records()
+            if (r.provenance.get("rule") or {}).get("rule_type") == rule_type
+            and r.confidence >= min_confidence
+            and not r.supersededBy
+            and "needs_review" not in r.tags
+        ]
 
 
 class MemoryRetrievalService:
@@ -373,16 +428,17 @@ class MemoryRetrievalService:
         q_tokens = set(re.findall(r"[a-z0-9_]+", query.lower()))
         q_tags = {t.lower() for t in (query_tags or [])}
         q_entities = {e.lower() for e in (query_entities or [])}
-        # Also auto-extract potential entity/tag tokens from query
-        for tok in ("ibm", "3570", "3571", "0000051143", "sic", "edgar", "zetaris", "churn", "weather", "dominion"):
-            if tok in q_tokens:
-                q_entities.add(tok)
-                q_tags.add(tok)
+        records = self.store.all_records()
+        # Auto-extract: any query token that names an entity or tag already known to the store.
+        known_entities = {e.lower() for r in records for e in r.entities}
+        known_tags = {t.lower() for r in records for t in r.tags}
+        q_entities |= q_tokens & known_entities
+        q_tags |= q_tokens & known_tags
 
         scored_items: List[Dict[str, Any]] = []
         now = datetime.now(timezone.utc)
 
-        for rec in self.store.all_records():
+        for rec in records:
             semantic_sim = cosine_similarity(query_vec, rec.embedding)
             rec_tokens = set(re.findall(r"[a-z0-9_]+", rec.content.lower()))
             if q_tokens and rec_tokens:
@@ -401,8 +457,8 @@ class MemoryRetrievalService:
 
             if query_domain and rec.domain.lower() == query_domain.lower():
                 domain_sim = 1.0
-            elif rec.domain.lower() in q_tokens or rec.domain.lower() in ("taxonomy", "zetaris_dq", "enterprise_audit"):
-                domain_sim = 0.85 if any(t in q_tokens for t in ("sic", "edgar", "enterprise", "retention", "3570", "exposure", "q4", "q3")) else 0.4
+            elif rec.domain.lower() in q_tokens:
+                domain_sim = 0.85
             else:
                 domain_sim = 0.3
 
@@ -601,25 +657,35 @@ class MemoryMiningService:
         agent_id: str = "FinalReviewerAgent",
         run_id: Optional[str] = None,
         record_id: Optional[str] = None,
+        rule: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """Store a mined fact; re-mining an existing id reinforces it rather than replacing it.
+
+        `rule` is an optional machine-readable payload (stored under provenance.rule) so later runs can apply
+        the learned behaviour directly instead of re-parsing prose.
+        """
         rec_id = record_id or f"mem-{hashlib.sha256(f'{domain}:{content}'.encode('utf-8')).hexdigest()[:12]}"
         record = MemoryRecord(
             id=rec_id,
             content=content,
             type=memory_type,
             layer=layer,
-            tags=tags or ["zetaris", "sic_3570", "taxonomy_reconciliation"],
+            tags=tags or [],
             confidence=confidence,
             source=source,
             domain=domain,
-            entities=entities or ["IBM", "0000051143", "SIC_3570", "SIC_3571"],
+            entities=entities or [],
             agentId=agent_id,
             runId=run_id,
         )
+        if rule:
+            record.provenance = {**record.provenance, "rule": rule}
         conflict_report = self.conflict_service.detect_and_resolve(record, run_id=run_id)
-        stored = self.store.create(record)
+        existed = any(r.id == rec_id for r in self.store.all_records())
+        stored = self.store.reinforce(record) if existed else self.store.create(record)
         return {
             "record": stored.to_dict(),
+            "reinforced_existing": existed,
             "conflict_report": conflict_report,
         }
 
@@ -676,18 +742,40 @@ class DreamingService:
         self.ledger = ledger
 
     def propose_dreams(self, run_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Propose generalisations across active memories that share a structured rule type or a domain.
+
+        Proposals are never written back automatically; they are surfaced for review (non-mutating).
+        """
         active = [r for r in self.store.all_records() if not r.supersededBy and r.confidence >= 0.70]
+        groups: Dict[str, List[MemoryRecord]] = {}
+        for rec in active:
+            rule_type = (rec.provenance.get("rule") or {}).get("rule_type")
+            groups.setdefault(rule_type or f"domain:{rec.domain}", []).append(rec)
+
         proposals: List[Dict[str, Any]] = []
-        if active:
+        for key, members in sorted(groups.items()):
+            if key.startswith("domain:") and len(members) < 2:
+                continue
+            rules = [m.provenance.get("rule") or {} for m in members]
+            if key == "sic_summary_to_leaf":
+                pairs = ", ".join(f"{r.get('summary_code')}->{r.get('leaf_code')}" for r in rules)
+                hypothesis = (
+                    f"Learned summary-to-leaf mappings ({pairs}) suggest a general USL rule: any EDGAR SIC that is a "
+                    "summary header should be expanded through company_dns.sic_codes.parent_summary_code before "
+                    "cohort aggregation, rather than waiting for fk_sic_check to fail."
+                )
+            else:
+                shared = set.intersection(*(set(t.lower() for t in m.tags) for m in members)) if members else set()
+                hypothesis = (
+                    f"{len(members)} memories in '{key.split(':', 1)[-1]}' share tags {sorted(shared) or '[]'}; "
+                    "candidate for consolidation into a single higher-order rule."
+                )
+            top = sorted(members, key=lambda m: m.confidence, reverse=True)[:3]
             proposal = {
-                "dream_id": f"drm-{uuid.uuid4().hex[:8]}",
-                "derived_from": [r.id for r in active[:3]],
-                "hypothesis": (
-                    "Cross-system joins between SEC EDGAR 3-digit summary SIC codes (e.g., 3570) "
-                    "and US SIC V4 4-digit leaf tables (3571..3577) require Industry Group prefix expansion "
-                    "prior to cohort retention aggregation."
-                ),
-                "confidence": round(sum(r.confidence for r in active[:3]) / min(len(active), 3), 4),
+                "dream_id": f"drm-{hashlib.sha256((key + ''.join(m.id for m in top)).encode()).hexdigest()[:8]}",
+                "derived_from": [m.id for m in top],
+                "hypothesis": hypothesis,
+                "confidence": round(sum(m.confidence for m in top) / len(top), 4),
             }
             proposals.append(proposal)
             self.ledger.append("dream_proposed", proposal["dream_id"], proposal, run_id=run_id)
@@ -713,19 +801,33 @@ GLOBAL_HMEM = HMemEngine()
 HMEM_STATE_FILE = LOGS_DIR / "hmem_state_store.json"
 
 
-def save_hmem_state(engine: HMemEngine = GLOBAL_HMEM) -> None:
-    data = [rec.to_dict() for rec in engine.store.all_records()]
-    HMEM_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    HMEM_STATE_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+def save_hmem_state(engine: HMemEngine = GLOBAL_HMEM, path: Optional[Path] = None) -> None:
+    target = path or HMEM_STATE_FILE
+    with engine.store.lock:
+        data = [rec.to_dict() for rec in engine.store.all_records()]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.replace(target)  # atomic: a crash mid-write never leaves a truncated store
 
 
-def load_hmem_state(engine: HMemEngine = GLOBAL_HMEM) -> None:
-    if not HMEM_STATE_FILE.exists():
-        return
+def load_hmem_state(engine: HMemEngine = GLOBAL_HMEM, path: Optional[Path] = None) -> int:
+    """Merge persisted records into `engine`; returns how many were loaded. Corrupt entries are skipped, not fatal."""
+    target = path or HMEM_STATE_FILE
+    if not target.exists():
+        return 0
     try:
-        raw_list = json.loads(HMEM_STATE_FILE.read_text(encoding="utf-8"))
-        for item in raw_list:
-            if item.get("id") not in engine.store._records:
-                engine.store._records[item["id"]] = MemoryRecord(**item)
-    except Exception:
-        pass
+        raw_list = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"[WARN] H-MEM state at {target} unreadable ({type(exc).__name__}); starting empty.", file=sys.stderr)
+        return 0
+    loaded = 0
+    with engine.store.lock:
+        for item in raw_list if isinstance(raw_list, list) else []:
+            try:
+                if item.get("id") not in engine.store._records:
+                    engine.store._records[item["id"]] = MemoryRecord(**item)
+                    loaded += 1
+            except (TypeError, ValueError, KeyError) as exc:
+                print(f"[WARN] Skipping malformed H-MEM record: {type(exc).__name__}: {exc}", file=sys.stderr)
+    return loaded

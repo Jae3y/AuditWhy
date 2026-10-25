@@ -1,12 +1,15 @@
-"""Unified LLM Router & Deterministic Structured Reasoning Generator.
+"""Unified LLM Router & Deterministic Structured Reasoning Fallback.
 
 Priority Chain:
 1. Meterless Nightshift Runtime 1.4 (if online & authorized)
 2. NVIDIA NIM OpenAI-compatible API (nvidia/nemotron-3.5-lightning-30b-a3b,
    nvidia/nemotron-3-ultra-550b-a55b with enable_thinking: True,
    nvidia/nemotron-3.5-super-vl-120b-a12b) with 2s/4s/8s exponential backoff on HTTP 429
-3. Built-in Deterministic Structured Reasoning Generator that dynamically inspects
-   the live SQL rows, World Model entities, and H-MEM context passed in the prompt.
+3. Deterministic fallback: the calling agent supplies `fallback_text` that it has already derived from the
+   live SQL rows / World Model state, so offline output is still grounded in the data actually retrieved.
+
+Decisions (evidence gates, DQ verdicts, claim blocking) are always computed in code by the agents; the LLM only
+contributes narrative, so a judge running SAMPLE_MODE=true sees the exact same verdicts as a live run.
 """
 
 from __future__ import annotations
@@ -20,7 +23,9 @@ from app.adapters.meterless_provider import (
     is_valid_meterless_token,
     plan_route,
 )
-from app.config import settings
+from app.config import redact_sensitive_text, settings
+
+DETERMINISTIC_PROVIDER = "deterministic_structured_generator"
 
 
 class LLMRouter:
@@ -30,20 +35,27 @@ class LLMRouter:
         self.sample_mode = sample_mode if sample_mode is not None else settings.sample_mode
         self.meterless = MeterlessProviderClient()
         self.call_history: List[Dict[str, Any]] = []
+        self._probe_cache: Optional[Dict[str, Any]] = None
+
+    def _meterless_probe(self) -> Dict[str, Any]:
+        """Probe /v1/models once per router (i.e. once per run) instead of before every completion."""
+        if self._probe_cache is None:
+            self._probe_cache = self.meterless.probe_status(timeout=1.5)
+        return self._probe_cache
 
     def get_provider_status(self) -> Dict[str, Any]:
-        if self.sample_mode and not is_valid_meterless_token(settings.meterless_api_key) and not settings.nvidia_api_key:
+        if self.sample_mode:
             return {
-                "active_provider": "deterministic_structured_generator",
+                "active_provider": DETERMINISTIC_PROVIDER,
                 "meterless_status": "offline_sample_mode",
-                "nvidia_nim_configured": False,
+                "nvidia_nim_configured": bool(settings.nvidia_api_key),
             }
-        probe = self.meterless.probe_status(timeout=1.5)
+        probe = self._meterless_probe() if is_valid_meterless_token(self.meterless.api_key) else {"status": "unconfigured"}
         return {
             "active_provider": (
                 "meterless_nightshift_1.4"
                 if probe["status"] == "online"
-                else ("nvidia_nim_nemotron" if settings.nvidia_api_key else "deterministic_structured_generator")
+                else ("nvidia_nim_nemotron" if settings.nvidia_api_key else DETERMINISTIC_PROVIDER)
             ),
             "meterless_status": probe["status"],
             "nvidia_nim_configured": bool(settings.nvidia_api_key),
@@ -55,7 +67,7 @@ class LLMRouter:
         task: str,
         system_prompt: str,
         user_prompt: str,
-        context_data: Optional[Dict[str, Any]] = None,
+        fallback_text: str,
         temperature: float = 0.1,
         max_tokens: int = 1024,
     ) -> Dict[str, Any]:
@@ -64,11 +76,11 @@ class LLMRouter:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
+        errors: List[str] = []
 
         # Priority 1: Meterless Nightshift Runtime 1.4
         if not self.sample_mode and is_valid_meterless_token(self.meterless.api_key):
-            probe = self.meterless.probe_status(timeout=1.5)
-            if probe["status"] == "online":
+            if self._meterless_probe()["status"] == "online":
                 try:
                     res = self.meterless.chat_completion(
                         messages=messages,
@@ -76,35 +88,34 @@ class LLMRouter:
                         temperature=temperature,
                         max_tokens=max_tokens,
                     )
-                    self._record_call(task, res["provider"], res["model"], route)
-                    return res
-                except Exception:
-                    pass
+                    if res.get("content", "").strip():
+                        self._record_call(task, res["provider"], res["model"], route, live=True)
+                        return {**res, "is_live": True}
+                    errors.append("meterless: empty completion")
+                except Exception as exc:  # noqa: BLE001 - any provider failure falls through to the next tier
+                    errors.append(f"meterless: {type(exc).__name__}")
 
         # Priority 2: NVIDIA NIM OpenAI-compatible Endpoint (with 2s/4s/8s backoff on 429)
         if not self.sample_mode and settings.nvidia_api_key:
             try:
                 res = self._call_nvidia_nim(messages, route, temperature, max_tokens)
-                self._record_call(task, res["provider"], res["model"], route)
-                return res
-            except Exception:
-                pass
+                if res.get("content", "").strip():
+                    self._record_call(task, res["provider"], res["model"], route, live=True)
+                    return {**res, "is_live": True}
+                errors.append("nvidia_nim: empty completion")
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"nvidia_nim: {type(exc).__name__}")
 
-        # Priority 3: Built-in Deterministic Structured Reasoning Generator
-        content = self._deterministic_structured_generator(
-            task=task,
-            user_prompt=user_prompt,
-            context_data=context_data or {},
-            route=route,
-        )
-        provider_label = "deterministic_structured_generator (nemotron-route-simulated)"
-        self._record_call(task, provider_label, route["nvidia_model"], route)
+        # Priority 3: data-grounded deterministic text supplied by the calling agent
+        provider_label = f"{DETERMINISTIC_PROVIDER} (nemotron-route-simulated)"
+        self._record_call(task, provider_label, route["nvidia_model"], route, live=False, errors=errors)
         return {
             "provider": provider_label,
             "model": route["nvidia_model"],
             "meterless_class": route["meterless_model"],
             "enable_thinking": route["enable_thinking"],
-            "content": content,
+            "content": fallback_text,
+            "is_live": False,
         }
 
     def _call_nvidia_nim(
@@ -126,85 +137,46 @@ class LLMRouter:
             "max_tokens": max_tokens,
         }
         if route.get("enable_thinking"):
-            payload["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
+            # Raw HTTP: chat_template_kwargs is a top-level field. (`extra_body` only exists in the OpenAI SDK.)
+            payload["chat_template_kwargs"] = {"enable_thinking": True}
 
         backoff_delays = [2.0, 4.0, 8.0]
-        for attempt, delay in enumerate(backoff_delays + [0.0]):
-            try:
-                with httpx.Client(timeout=60.0) as client:
-                    resp = client.post(url, headers=headers, json=payload)
-            except httpx.ConnectError as exc:
-                if "CERTIFICATE_VERIFY_FAILED" in str(exc):
-                    with httpx.Client(timeout=60.0, verify=False) as client:
-                        resp = client.post(url, headers=headers, json=payload)
-                else:
-                    raise
-            if resp.status_code == 429 and attempt < len(backoff_delays):
-                time.sleep(delay)
-                continue
-            resp.raise_for_status()
-            data = resp.json()
-            content = (
-                data.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-            )
-            return {
-                "provider": "nvidia_nim",
-                "model": route["nvidia_model"],
-                "meterless_class": route["meterless_model"],
-                "enable_thinking": route["enable_thinking"],
-                "content": content,
-            }
+        with httpx.Client(timeout=60.0) as client:
+            for attempt in range(len(backoff_delays) + 1):
+                resp = client.post(url, headers=headers, json=payload)
+                if resp.status_code == 429 and attempt < len(backoff_delays):
+                    time.sleep(backoff_delays[attempt])
+                    continue
+                resp.raise_for_status()
+                message = (resp.json().get("choices") or [{}])[0].get("message", {})
+                return {
+                    "provider": "nvidia_nim",
+                    "model": route["nvidia_model"],
+                    "meterless_class": route["meterless_model"],
+                    "enable_thinking": route["enable_thinking"],
+                    "content": message.get("content") or "",
+                }
         raise RuntimeError("NVIDIA NIM rate limit exceeded after 2s/4s/8s backoff.")
 
-    def _deterministic_structured_generator(
+    def _record_call(
         self,
-        *,
         task: str,
-        user_prompt: str,
-        context_data: Dict[str, Any],
+        provider: str,
+        model: str,
         route: Dict[str, Any],
-    ) -> str:
-        """Inspects actual SQL rows, World Model entities, and H-MEM memories to produce
-        dynamic, input-dependent structured agent outputs.
-        """
-        rows_count = context_data.get("row_count", 0)
-        entities_count = context_data.get("entities_count", 0)
-        orphan_cik = context_data.get("orphan_cik", "0000051143")
-        warm_mode = bool(context_data.get("warm_mode", False))
-        query_preview = user_prompt[:140].replace("\n", " ")
-
-        if task == "plan":
-            return (
-                f"Decomposed query ('{query_preview}') into 4 falsifiable hypotheses across Zetaris USL tables "
-                f"(warm_memory={warm_mode}): H1 Cohort Retention Variance, H2 SEC EDGAR vs US SIC V4 Taxonomic Integrity, "
-                f"H3 P1/P2 Support & API Latency Correlation, H4 Enterprise Pricing-Tier Change Impact."
-            )
-        if task == "evaluate":
-            if context_data.get("stage") == "dq_check":
-                return (
-                    f"Executed Zetaris DQ check `SHOW DQ ALL INVALID TABLE sic_edgar_usl`. "
-                    f"Detected foreign-key orphan CIK {orphan_cik} (IBM, SIC 3570 summary code absent from 4-digit leaf table), "
-                    f"which drops $62.753B in FY2025 revenue on naive inner joins."
-                )
-            return (
-                "Audited Analyst claims against Zetaris query provenance. Blocked H4 (pricing-tier changes) "
-                "due to 0 supporting table rows in Zetaris catalog; classified H4 under untested_factors."
-            )
-        return (
-            f"Synthesized grounded explanation over {rows_count} Zetaris rows and {entities_count} World Model entities "
-            f"using route {route['meterless_model']} / {route['nvidia_model']}."
-        )
-
-    def _record_call(self, task: str, provider: str, model: str, route: Dict[str, Any]) -> None:
-        self.call_history.append(
-            {
-                "task": task,
-                "provider": provider,
-                "model": model,
-                "meterless_class": route["meterless_model"],
-                "disposition": route["disposition"],
-                "enable_thinking": route["enable_thinking"],
-            }
-        )
+        *,
+        live: bool,
+        errors: Optional[List[str]] = None,
+    ) -> None:
+        entry: Dict[str, Any] = {
+            "task": task,
+            "provider": provider,
+            "model": model,
+            "meterless_class": route["meterless_model"],
+            "disposition": route["disposition"],
+            "enable_thinking": route["enable_thinking"],
+            "live": live,
+        }
+        if errors:
+            entry["fallback_reasons"] = [redact_sensitive_text(e) for e in errors]
+        self.call_history.append(entry)

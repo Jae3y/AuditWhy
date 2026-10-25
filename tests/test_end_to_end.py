@@ -47,12 +47,25 @@ def test_example_1_cold_investigation_loop() -> None:
     assert body["multivariate_correlations"]["timeout_vs_retention_loss_r"] > 0.85
     assert body["multivariate_correlations"]["latency_vs_retention_loss_r"] > 0.85
 
-    # Verify 12..18 multi-agent trace events
+    # Hypotheses carry computed verdicts, and the caveat quotes the computed statistic
+    statuses_by_h = {h["hypothesis_id"]: h["status"] for h in body["hypotheses"]}
+    assert statuses_by_h == {"H1": "verified", "H2": "reconciled_after_dq_fix", "H3": "verified", "H4": "blocked_untested"}
+    r = body["multivariate_correlations"]["timeout_vs_retention_loss_r"]
+    assert str(r) in body["correlation_vs_causation_caveat"]
+    assert 0.0 < body["confidence"] < 1.0
+
+    # Every query is in the evidence ledger; the pricing probe is a catalog miss, not a hardcoded empty result
+    pricing = next(e for e in body["evidence_ledger"] if e["purpose"] == "pricing_tier_changes")
+    assert pricing["status"] == "TABLE_NOT_FOUND" and pricing["row_count"] == 0
+
+    # Multi-agent trace: DQ critique loop and claim block both fire
     events = body["trace_events"]
-    assert 12 <= len(events) <= 18
+    assert 12 <= len(events) <= 24
     statuses = {e["status"] for e in events}
     assert "needs_revision" in statuses
     assert "partial_success" in statuses
+    actions = [e["action"] for e in events]
+    assert actions.index("detect_zetaris_dq_orphan") < actions.index("verify_dq_reconciliation")
 
 
 def test_example_2_warm_memory_compounding() -> None:
@@ -62,11 +75,18 @@ def test_example_2_warm_memory_compounding() -> None:
     body = resp.json()
 
     assert body["status"] == "success"
-    assert body["meterless_engines"]["hmem"]["warm_mode_activated"] is True
-    assert body["meterless_engines"]["markovian"]["warm_mode"] is True
-    assert body["meterless_engines"]["markovian"]["chunks_executed"] == 2
-    assert body["meterless_engines"]["markovian"]["cold_vs_warm_chunk_delta"] == 2
+    hm, mk = body["meterless_engines"]["hmem"], body["meterless_engines"]["markovian"]
+    assert hm["warm_mode_activated"] is True
+    assert "3570" in hm["rules_applied"]
+    assert mk["warm_mode"] is True
+    # The recalled rule removes the taxonomy-discovery stage, so the warm run needs fewer bounded chunks
+    assert "taxonomy_reconciliation" not in mk["stages"]
+    assert mk["chunks_executed"] < mk["cold_baseline_chunks"]
+    assert mk["cold_vs_warm_chunk_delta"] == mk["cold_baseline_chunks"] - mk["chunks_executed"]
     assert body["zetaris_lineage"]["retriever_passes_executed"] == 1
+    assert body["zetaris_lineage"]["dq_revision_triggered"] is False
+    assert body["taxonomic_anomaly_resolution"]["resolution_mode"] == "warm_hmem_chunk0_recall"
+    assert any(f.endswith("helpful") for f in hm["feedback_applied"])
 
 
 def test_example_3_adversarial_injection_blocked() -> None:
@@ -133,6 +153,11 @@ def test_sql_workbench_and_412_billing_events_warehouse() -> None:
     assert r2.status_code == 200
     d2 = r2.json()
     assert d2["status"] == "BLOCKED_BY_SCOUT_GUARD"
+
+    # 3. Writes that slip past the guard's patterns are still refused by the read-only gate
+    r3 = client.post("/api/sql", json={"sql": "UPDATE edgar_company_facts SET revenue_2025 = 0"})
+    assert r3.json()["status"] == "REJECTED_READ_ONLY"
+    assert client.post("/api/sql", json={"sql": "SELECT 1", "limit": "abc"}).status_code == 400
 
 
 def test_engines_telemetry_and_credentials_endpoints() -> None:

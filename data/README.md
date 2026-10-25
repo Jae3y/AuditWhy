@@ -18,4 +18,8 @@ This directory contains the local deterministic mirror of the Zetaris Unified Se
    - **Intentional Provenance Gap:** Contains **no pricing-tier change table or price-increase history**, ensuring that any agent hypothesis attributing Q3 churn to pricing changes is intercepted and blocked by `EvidenceEvaluatorAgent` as an `untested_factor`.
 
 4. **`sample/support_tickets_usage.json`** (`ops.support_tickets_usage`)
-   - Quarterly P1/P2 escalation counts, API gateway p99 latency (`ms`), timeout error rates (`%`), and telemetry across enterprise accounts showing strong correlation ($r = 0.89$) between v4.2 connector timeout spikes and Q3 retention drops in the Computer & Office Equipment cohort.
+   - Quarterly P1/P2 escalation counts, API gateway p99 latency (`ms`), timeout error rates (`%`), and telemetry across enterprise accounts. Across all 10 accounts, batch-sync timeout rate correlates with Q3 retention loss at $r \approx 0.96$. The agents compute this at run time; nothing downstream hardcodes it.
+
+## Editing the Data
+
+Every verdict is derived from these files, so they are safe to edit for experiments. Point a run at a copy with `AuditWhyOrchestrator(sample_dir=...)`. For example, set HP's `sic_code` to `3570`, or Oracle's to `7370`, and the evaluator will catch and reconcile each new orphan. `auditwhy_warehouse.db` is a read-only snapshot for inspection and is rebuilt automatically when these files or the schema code change.

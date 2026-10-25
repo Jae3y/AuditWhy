@@ -8,7 +8,7 @@
 
 | Role | Track | How AuditWhy Delivers |
 | :--- | :--- | :--- |
-| **Primary Track** | **Track 02 — The Agent That Can Explain Why** | Moves beyond surface-level KPI reporting to falsifiable root-cause explanation: formulates 4 explicit hypotheses (`H1`–`H4`), proves *why* Q3 retention dropped (`r = 0.89` with `v4.2_batch_connector_gateway_timeout` & `2,140ms` p99 latency), proves *why* BI dashboards missed `$62.753B` in SEC revenue (the **IBM SIC 3570** summary-vs-leaf anomaly), blocks unsupported pricing claims (`H4`), and enforces a mandatory *Correlation vs. Causation & Untested Factors* caveat. |
+| **Primary Track** | **Track 02 — The Agent That Can Explain Why** | Moves beyond surface-level KPI reporting to falsifiable root-cause explanation: formulates 4 explicit hypotheses (`H1`–`H4`) that start `pending` and are decided only by retrieved rows, shows *why* Q3 retention dropped (timeout rate vs. retention loss `r = 0.962`, 95% CI `0.843..0.991`, computed live from `ops.support_tickets_usage`), proves *why* BI dashboards missed `$62.753B` in SEC revenue (the **IBM SIC 3570** summary-vs-leaf anomaly), blocks unsupported pricing and competitor claims through a generic provenance gate, and enforces a *Correlation vs. Causation & Untested Factors* caveat that the reviewer audits line by line. |
 | **Secondary Track** | **Track 01 — Solving Fragmented Intelligence** | Reconciles 4 disparate enterprise silos—SEC EDGAR XBRL filings (`edgar.company_facts`), US SIC V4 taxonomy (`company_dns.sic_codes`), ERP contract cohorts (`erp.customer_churn_billing`), and API/support telemetry (`ops.support_tickets_usage`)—into a single Zetaris Unified Semantic Layer (`sic_edgar_usl`) and an idempotent Meterless `World Model` (`ent_<sha256>`). |
 | **Secondary Track** | **Track 03 — Reasoning Architecture** | Implements a non-linear 6-agent critique-and-revision state machine backed by `Markovian` bounded-context chunk reasoning (`[STATE_CHECKPOINT]` $\rightarrow$ `[TASK_COMPLETE]`), `H-MEM` 8-factor hybrid recall at chunk 0, and `Scout Intent` 5-layer security + HMAC-SHA256 signed `ExecutionContract` enforcement. |
 
@@ -59,7 +59,8 @@
 | [AGENT 5] MarkovianAnalystAgent                                         | Loop 2:
 |  * Meterless Markovian Engine: H-MEM injected into Chunk 0 ONLY         | Strips H4
 |  * 4-step carryover compression (`[STATE_CHECKPOINT]`->`[TASK_COMPLETE]`)| Pricing Claim
-|  * Cold Run: 4 chunks | Warm Run (H-MEM recall): 2 chunks (90.9% saved) +---------------+
+|  * Cold Run: 4 stages | Warm Run (H-MEM recall): 3 stages (no taxonomy  +---------------+
+|    discovery); ~38% measured token saving vs a full-history chain        |
 +-----------------------------------------------------------------------------------------+
                                             |
                                             v
@@ -127,7 +128,7 @@ python scripts/smoke_test.py
 # Example 1: Cold Investigation Run (Catches IBM SIC 3570 orphan, blocks H4 pricing claim, mines rule into H-MEM)
 python run.py --input input_examples/example_1.json --output output_examples/example_1.json
 
-# Example 2: Warm Memory Compounding Run (Recalls SIC 3570->3571 rule at Chunk 0, finishes in 2 chunks vs 4)
+# Example 2: Warm Memory Compounding Run (Recalls SIC 3570->3571 rule at Chunk 0: 1 retrieval pass, 3 stages vs 4, no retry)
 python run.py --input input_examples/example_2.json --output output_examples/example_2.json
 
 # Example 3: Adversarial Prompt Injection & Conflict Test (Scout 5-layer guard blocks DROP TABLE & exfiltration)
@@ -153,8 +154,35 @@ python run.py
 ### 4. Docker Build & Run
 ```bash
 docker build -t auditwhy:latest .
-docker run --rm -p 8000:8000 -e PORT=8000 -e SAMPLE_MODE=true auditwhy:latest
+docker run --rm -p 8000:8000 -e PORT=8000 -e SAMPLE_MODE=true -e AUDITWHY_ADMIN_TOKEN=change-me auditwhy:latest
 ```
+Inside Docker the browser is not a loopback client, so the credentials panel needs the admin token (there is a field for it in the dashboard).
+
+---
+
+## How a Verdict Is Reached (Nothing Is Pre-Written)
+
+Every number, status and sentence in a `RunResponse` is derived from rows the agents retrieved in that run. Change a value in `data/sample/` and the report changes with it (`tests/test_investigation_integrity.py` does exactly that).
+
+1. **Plan.** `PlannerAgent` emits hypotheses with `status: "pending"` plus a retrieval plan. Each hypothesis declares the datasets that must return rows before any claim about it may be asserted (H4 needs `erp.pricing_tier_changes`; the competitor confounder needs `crm.opportunity_loss_reasons`).
+2. **Retrieve.** `DataRetrieverAgent` executes the plan and records every statement in the `evidence_ledger` (purpose, hypotheses, tables, status, row count). A relation missing from the catalog returns `TABLE_NOT_FOUND`, exactly like a Zetaris catalog miss.
+3. **Critique the data.** `EvidenceEvaluatorAgent` runs its *own* `SHOW DQ ALL INVALID TABLE ... sic_edgar_usl` and compares the orphans against the filings that actually carry a leaf code in the joined evidence. Any orphan missing from the join means the join silently dropped data, so it emits `needs_revision`. Nothing in that check names IBM or 3570.
+4. **Recover.** Pass 2 expands each orphaned summary code through `company_dns.sic_codes` (`parent_summary_code`) and rebuilds the join from the discovered mapping (`app/reconciliation.py`). The evaluator then re-runs its DQ check to verify the fix. The loop is bounded by `options.max_retries`.
+5. **Analyse in bounded chunks.** `MarkovianAnalystAgent` runs cohort scan → taxonomy reconciliation → operational correlation → candidate synthesis as Markovian chunks over World Model entities. It deliberately drafts a claim for *every* hypothesis, pricing included.
+6. **Critique the claims.** The evaluator blocks any claim whose required datasets returned no rows. Correlation claims also need `|r| ≥ 0.7` with `n ≥ 5`, otherwise they are downgraded to `inconclusive`. Blocked claims become `untested_factors`, together with the data needed to test them.
+7. **Review.** `FinalReviewerAgent` checks three gates: the caveat names every untested factor and every correlational statistic; the summary contains no causal language about a blocked factor; and every finding cites evidence tables.
+
+Confidence is computed, not asserted: H3 uses the lower bound of the 95% Fisher-z confidence interval on Pearson r, and the run's overall confidence is the mean of tested hypotheses, discounted 5% per untested one. The same pipeline handles questions the demo never anticipated. Ask about Oracle and the focus becomes Oracle, and H1 is **refuted** (102% net retention).
+
+### H-MEM Memory Policy (`options.warm_memory_seed`)
+
+| Value | Policy | Use |
+| :--- | :--- | :--- |
+| *unset* | `auto`: apply any recalled high-trust (`≥ 0.85`, not superseded, not `needs_review`) structured rule | Normal operation; this is how compounding happens organically |
+| `false` | `cold`: recall for telemetry, never apply | Reproducible discovery baseline (`example_1`) |
+| `true` | `warm`: seed a clearly-labelled prior-session fixture if the store is empty, then apply | Standalone warm demo on a fresh clone (`example_2`) |
+
+Rules are scored by outcome. A recalled rule that restores its filer gets `helpful` (+0.05). A rule that fails is detected by the evaluator, replaced by fresh discovery, and penalised with `wrong` (−0.20, `needs_review`); the corrected rule is stored under a new id and supersedes it through `ConflictDetectionService`. Re-mining a known rule *reinforces* it instead of resetting its earned confidence.
 
 ---
 
@@ -175,21 +203,23 @@ docker run --rm -p 8000:8000 -e PORT=8000 -e SAMPLE_MODE=true auditwhy:latest
 2. **Markovian Bounded-Context Reasoning (`app/engines/markovian.py`):**
    - Validates `ChunkConfig` bounds (`chunkSize 1000..128000`, `maxChunks 1..32`, `carryoverTokens 128..32768`, `overlapTokens 0..4096`) raising `MarkovianConfigError`.
    - Injects H-MEM into **Chunk 0 only** (`memoryContext + "\n\nTask: " + prompt`); continuation chunks receive only the ~200-char goal summary + compressed carryover.
-   - Strips `[STATE_CHECKPOINT]` and `[TASK_COMPLETE]` markers and logs exact token savings (`efficiencyPercent = 90.9%` on Cold 4-chunk runs; Warm runs complete in **2 chunks instead of 4**).
+   - Each chunk is a real analysis stage. The chunk plan comes from pending work, so a warm run skips taxonomy discovery and finishes in **3 stages instead of 4**.
+   - Keeps two ledgers. `efficiencyPercent` is **measured**: the bounded prompts actually sent vs. what a naive chain re-sending the full transcript would send (about 38% on the 4-stage cold run, growing with chain length). `specProjectedEfficiencyPercent` applies the AGENTS.md formula, which assumes every prior chunk filled `chunkSize = 8000` (about 96%). It is kept for conformance only, because real chunks here are a few hundred tokens.
 3. **World Model Shared Grounded State (`app/engines/world_model.py`):**
    - Implements `WorldStoreService`, 6-stage idempotent `IngestPipelineService` (`extract -> normalize -> resolve -> validate -> append -> project`), and `ContextBuilderService`.
    - Generates deterministic IDs (`ent_` + first 16 hex chars of `sha256(f"{entity_type.lower()}:{normalized_name.lower()}")`) and guarantees `diff_count == 0` on duplicate ingestion.
 4. **Scout Intent Guard & Execution Contracts (`app/engines/scout_intent.py`):**
    - Executes `Sense -> Interpret -> Guard -> Route -> Recommend -> ExecutionContract`.
-   - 5-Layer Guard blocks prompt injections, destructive SQL (`DROP TABLE`), secret exfiltration URLs, RBAC/scope violations, and PII leaks.
-   - Issues **HMAC-SHA256 signed `ExecutionContract`s** (`signedBy: "scout"`, 300s TTL) verified before every Zetaris tool call.
+   - 5-Layer Guard blocks prompt injections, destructive SQL (`DROP TABLE`), secret exfiltration URLs, RBAC/scope violations, and PII leaks. Card numbers are redacted only when they pass a Luhn check, so CIKs and SIC codes survive. The rate limit is a process-wide sliding window, so it holds across runs.
+   - Issues **HMAC-SHA256 signed `ExecutionContract`s** (`signedBy: "scout"`, 300s TTL) verified before every Zetaris tool call. Without `SCOUT_HMAC_KEY` the key is random per process, so contracts cannot be forged from a public default.
 
 ### 3. Power Layer: Meterless Nightshift Runtime 1.4 & NVIDIA Nemotron (`app/adapters/meterless_provider.py` & `app/llm.py`)
 - Implements **Provider Contract v4**: URL normalisation to `<scheme>://<host>/v1` (never `/v1/v1`), `parse_connect_link()` for `/connect#k=...&m=...&n=...`, immediate rejection of placeholder token `rt-local`, `/v1/models` live discovery across ports `8088, 8090, 8787, 11434`, and mandatory headers (`Authorization: Bearer <token>`, `meterless-app: auditwhy`, `meterless-scope: user`).
 - **Task Routing (`plan_route`):**
   - `plan` / `retrieve` $\rightarrow$ `meterless/text.fast` / NVIDIA NIM `nvidia/nemotron-3.5-lightning-30b-a3b`
-  - `evaluate` / `grade` $\rightarrow$ `meterless/judge.deep` / NVIDIA NIM `nvidia/nemotron-3-ultra-550b-a55b` (`enable_thinking: True`)
+  - `evaluate` / `grade` $\rightarrow$ `meterless/judge.deep` / NVIDIA NIM `nvidia/nemotron-3-ultra-550b-a55b` (`enable_thinking: True`, sent as the top-level `chat_template_kwargs` field)
   - `analyze` / `synthesize` $\rightarrow$ `meterless/text.auto` / NVIDIA NIM `nvidia/nemotron-3.5-super-vl-120b-a12b`
+- **Division of labour:** verdicts (DQ, claim gates, reviewer gates) are always computed in code, so `SAMPLE_MODE=true` and a live run reach identical conclusions. Nemotron contributes the narrative for each Markovian chunk, the evaluator summaries, and the writer's executive narrative. Offline, each agent supplies its own data-derived text instead. Provider failures are recorded per call in `provider_routing.calls[].fallback_reasons`, never swallowed.
 
 ### 4. Development Layer: Cursor Workflow
 - Built using Cursor's multi-file architectural synthesis and iterative test-driven conformance harness (`scripts/run_conformance.py` and `tests/`) to verify strict compliance across all 4 `AGENTS.md` engine specs and the Provider v4 contract.
@@ -201,23 +231,41 @@ docker run --rm -p 8000:8000 -e PORT=8000 -e SAMPLE_MODE=true auditwhy:latest
 | Failure Scenario | Detection Mechanism | Autonomous Recovery / Mitigation | Trace Status Logged |
 | :--- | :--- | :--- | :--- |
 | **Zetaris Cluster Unreachable / Timeout** | `httpx` timeout (`20s`) after 3 `tenacity` exponential retries | Logs `fallback_to_sample_data` and executes SQL against `SampleZetarisEngine` (`data/sample/`) | `fallback` |
-| **Cross-Source Foreign Key Orphan (IBM SIC `3570`)** | `EvidenceEvaluatorAgent` runs `SHOW DQ ALL INVALID TABLE sic_edgar_usl` | Emits `needs_revision` to `PlannerAgent` & `DataRetrieverAgent` to run Pass-2 hierarchy recovery (`LIKE '357%'`) | `needs_revision` $\rightarrow$ `retrying` $\rightarrow$ `success` |
-| **Unverified Analyst Hypothesis (`H4` Pricing)** | `EvidenceEvaluatorAgent` checks row count of `erp.pricing_tier_changes` (`0` rows) | Blocks causal claim (`flag_unsupported_claim`) and forces `MarkovianAnalystAgent` to move `H4` to `untested_factors` | `partial_success` $\rightarrow$ `success` |
-| **Missing Epistemological Caveat in Draft** | `FinalReviewerAgent` audits `ExplanationWriterAgent` draft | Rejects initial draft (`needs_revision`) until explicit *Correlation vs. Causation & Untested Factors* caveat is added | `needs_revision` $\rightarrow$ `success` |
+| **Cross-Source Foreign Key Orphan (any summary SIC)** | `EvidenceEvaluatorAgent` runs `SHOW DQ ALL INVALID TABLE sic_edgar_usl` and diffs it against leaf-bearing joined rows | Emits `needs_revision`; Pass 2 expands each orphan through `parent_summary_code`; evaluator re-verifies (bounded by `max_retries`) | `needs_revision` $\rightarrow$ `retrying` $\rightarrow$ `success` |
+| **Unverified Analyst Claim (`H4` pricing, competitor displacement)** | Provenance gate: a required dataset returned `0` rows or `TABLE_NOT_FOUND` | Blocks the claim (`flag_unsupported_claim`) and moves it to `untested_factors` with the data needed to test it | `partial_success` $\rightarrow$ `success` |
+| **Weak or Under-Powered Correlation** | Statistical gate: `|r| < 0.7` or `n < 5` | Downgrades the hypothesis to `inconclusive` instead of asserting it | `success` |
+| **Recalled H-MEM Rule Is Wrong** | Evaluator still finds the filer dropped after the rule was applied in Pass 1 | Fresh discovery replaces the rule; the old record gets `wrong` feedback and is superseded by the corrected one | `needs_revision` $\rightarrow$ `success` |
+| **Missing / Incomplete Caveat or Causal Language about a Blocked Factor** | `FinalReviewerAgent` gates on caveat coverage, forbidden terms and finding provenance | Returns concrete issues to `ExplanationWriterAgent`, which revises against them | `needs_revision` $\rightarrow$ `success` |
 | **Prompt Injection / `DROP TABLE` / Exfiltration** | `ScoutGuardAgent` 5-Layer Guard (`layer1_prompt_injection`) | Immediately halts execution before any SQL or LLM call and refuses tool contract | `blocked` |
-| **Meterless Runtime `rt-local` or Offline** | `MeterlessProviderClient.probe_status()` on `GET /v1/models` | Rejects `rt-local` as `"unauthorized"`; falls back to NVIDIA NIM (`2s/4s/8s` 429 backoff) or Deterministic Generator | `success` |
+| **Write SQL in the Workbench (`ATTACH`, `UPDATE`, ...)** | Read-only statement gate plus SQLite authorizer on the warehouse connection | Refused before and at the engine level, so no file or row can be written | `REJECTED_READ_ONLY` |
+| **Unhandled Exception Mid-Run** | Orchestrator boundary | Returns a structured `status: "error"` response with the partial trace and evidence ledger | `fallback` |
+| **Meterless Runtime `rt-local` or Offline** | `MeterlessProviderClient.probe_status()` on `GET /v1/models` (once per run) | Rejects `rt-local` as `"unauthorized"`; falls back to NVIDIA NIM (`2s/4s/8s` 429 backoff) or deterministic text, logging the reason | `success` |
+
+## Security Model
+
+- **Read-only data plane:** the sample warehouse connection runs under a SQLite authorizer that only permits reads. `/api/sql` additionally accepts only `SELECT/WITH/SHOW/EXPLAIN/DESCRIBE`, and `limit` is validated and clamped.
+- **Admin endpoints:** `POST /api/credentials` accepts loopback callers, or `Authorization: Bearer $AUDITWHY_ADMIN_TOKEN` from anywhere else. Moving a provider URL to a new host without a new key clears the old key, so a key can never be redirected to an attacker's host. Values containing newlines are rejected before `.env` persistence.
+- **Identifiers:** `run_id` / `request_id` are reduced to `[A-Za-z0-9_.-]` before they reach any filename.
+- **Transport:** API-key-bearing calls never fall back to unverified TLS. `AUDITWHY_ALLOW_INSECURE_TLS` only affects the public, credential-free SEC/SIC probe.
+- **Dashboard:** every server-supplied string is HTML-escaped before rendering, because trace summaries echo user queries and model output.
 
 ---
 
 ## Conformance & Test Suite Summary
 
-Running `python -m pytest tests/ -v` and `python scripts/run_conformance.py` verifies:
-- `tests/test_engines_conformance.py`: **8/8 passed** (H-MEM mandatory source gate, 8-factor math, trust protection, non-mutating sleep preview; Markovian bounds, marker stripping, token math, memory seam; World Model `ent_` SHA-256 determinism & zero-diff idempotency; Scout Intent injection blocking & HMAC-SHA256 verification).
-- `tests/test_provider_contract.py`: **4/4 passed** (URL normalisation never `/v1/v1`, `rt-local` rejection, 8 `parse_connect_link` edge cases, and Nemotron task routing).
-- `tests/test_end_to_end.py`: **5/5 passed** (`GET /health`, Cold Run `example_1.json`, Warm Compounding Run `example_2.json`, Adversarial Block + Conflict Test `example_3.json`, and Vibe Coding payload).
+Running `python -m pytest tests/ -v` (47 tests) and `python scripts/run_conformance.py` verifies the following. Tests run against an isolated logs/H-MEM directory (`tests/conftest.py`), so results never depend on a previous run.
+- `tests/test_engines_conformance.py`: H-MEM mandatory source gate, 8-factor math, trust protection, non-mutating sleep preview; Markovian bounds, marker stripping, token math, memory seam; World Model `ent_` SHA-256 determinism & zero-diff idempotency; Scout Intent injection blocking & HMAC-SHA256 verification.
+- `tests/test_provider_contract.py`: URL normalisation never `/v1/v1`, `rt-local` rejection, 8 `parse_connect_link` edge cases, and Nemotron task routing.
+- `tests/test_end_to_end.py`: `GET /health`, the three canonical examples, Vibe Coding payload, workbench, telemetry and USL setup.
+- `tests/test_investigation_integrity.py`: perturbs the warehouse and the question to prove verdicts are data-driven. Covers multiple and unseen summary codes (`7370`), a clean taxonomy with no revision, numbers that track the rows, focus-dependent refutation, organic compounding, the cold policy, the wrong-rule trust loop, and the evaluator's provenance and statistical gates.
+- `tests/test_security.py`: engine-level write refusal, read-only workbench, `run_id` traversal, admin gating and key-redirect protection, `.env` injection, Luhn PII redaction, the shared rate limit, the non-public signing key, dashboard escaping, and the Nemotron `chat_template_kwargs` payload.
 
 ---
 
 ## Limitations & Pre-Existing Declarations
 - **Pre-Existing Code / Assets:** **None.** Every line of code, SQL script, sample dataset, engine implementation, and test in this repository was built from scratch for the Open Agent Hackathon 2026.
-- **Known Limitations:** In offline `SAMPLE_MODE=true`, SQL execution targets the local deterministic `SampleZetarisEngine` over `data/sample/` (10 enterprise SEC EDGAR filings, US SIC V4 hierarchy, and 412 aggregated ERP/support cohort events) rather than a distributed Spark cluster.
+- **Known Limitations:**
+  - In offline `SAMPLE_MODE=true`, SQL execution targets the local deterministic `SampleZetarisEngine` over `data/sample/` (10 enterprise SEC EDGAR filings, US SIC V4 hierarchy, and 412 aggregated ERP/support cohort events) rather than a distributed Spark cluster. Zetaris USL/DQ DDL (`COMPILE USL`, `REGISTER DQ`) is simulated by the mirror.
+  - With 10 accounts, correlations are suggestive rather than conclusive; that is why H3 confidence uses the CI lower bound and the caveat is mandatory.
+  - Hypothesis templates (H1–H4) are fixed per investigation type. Only the focus cohort, the evidence and the verdicts adapt to the question.
+  - The warm example seeds a labelled fixture only when the H-MEM store is empty; run `example_1` first to compound on a genuinely mined rule.

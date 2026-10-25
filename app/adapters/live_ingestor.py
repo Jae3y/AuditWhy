@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 import httpx
 
+from app.config import settings
 
 SEC_EDGAR_USER_AGENT = "AuditWhy-Enterprise-Investigator/1.0 (compliance@auditwhy.org)"
 COMPANY_DNS_SIC_URL = "https://company-dns.mediumroast.io/V4.0/sic.json"
@@ -19,14 +20,18 @@ IBM_EDGAR_FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK0000051143.
 
 
 def _get_json_with_ssl_fallback(url: str, headers: Dict[str, str] | None = None, timeout: float = 10.0) -> Any:
-    """Attempt standard TLS verification first; if Windows local root store raises SSLCertVerificationError, retry with verify=False."""
+    """Fetch public JSON with TLS verification.
+
+    Only when AUDITWHY_ALLOW_INSECURE_TLS=true (for broken local CA stores) is an unverified retry attempted;
+    these endpoints are public and credential-free, so no secret can leak over the unverified channel.
+    """
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:
             resp = client.get(url, headers=headers)
             resp.raise_for_status()
             return resp.json()
     except httpx.ConnectError as exc:
-        if "CERTIFICATE_VERIFY_FAILED" in str(exc):
+        if "CERTIFICATE_VERIFY_FAILED" in str(exc) and settings.allow_insecure_tls:
             with httpx.Client(timeout=timeout, follow_redirects=True, verify=False) as client:
                 resp = client.get(url, headers=headers)
                 resp.raise_for_status()

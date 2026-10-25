@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -12,10 +13,26 @@ load_dotenv()
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
 SAMPLE_DATA_DIR = DATA_DIR / "sample"
-LOGS_DIR = ROOT_DIR / "logs"
+# AUDITWHY_LOGS_DIR lets tests (and multi-tenant deployments) isolate traces, H-MEM state and ledgers.
+LOGS_DIR = Path(os.getenv("AUDITWHY_LOGS_DIR", "").strip() or (ROOT_DIR / "logs")).resolve()
 UI_DIR = Path(__file__).resolve().parent / "ui"
 
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Per-process signing key used when SCOUT_HMAC_KEY is unset, so contracts can never be forged
+# from a publicly known default. Contracts are only verified inside the process that issued them.
+_EPHEMERAL_SCOUT_KEY = secrets.token_hex(32)
+
+_SAFE_ID_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def safe_identifier(value: str | None, fallback: str = "run", max_len: int = 80) -> str:
+    """Reduce a caller-supplied id to [A-Za-z0-9_.-] so it is safe inside filenames and log keys.
+
+    Leading dots are stripped so ids like '../../etc' can never traverse out of LOGS_DIR.
+    """
+    cleaned = _SAFE_ID_PATTERN.sub("-", str(value or "")).strip("-.")[:max_len]
+    return cleaned or fallback
 
 _SECRET_PATTERNS = [
     re.compile(r"(Bearer\s+)[A-Za-z0-9._\-]+", re.IGNORECASE),
@@ -120,7 +137,24 @@ class Settings:
 
     @property
     def scout_hmac_key(self) -> str:
-        return os.getenv("SCOUT_HMAC_KEY", "auditwhy-scout-contract-v1").strip() or "auditwhy-scout-contract-v1"
+        return os.getenv("SCOUT_HMAC_KEY", "").strip() or _EPHEMERAL_SCOUT_KEY
+
+    @property
+    def scout_rate_limit_per_minute(self) -> int:
+        try:
+            return max(1, int(os.getenv("SCOUT_RATE_LIMIT_PER_MINUTE", "120")))
+        except ValueError:
+            return 120
+
+    @property
+    def admin_token(self) -> str:
+        """Optional bearer token that unlocks state-changing admin endpoints for non-loopback clients."""
+        return os.getenv("AUDITWHY_ADMIN_TOKEN", "").strip()
+
+    @property
+    def allow_insecure_tls(self) -> bool:
+        """Opt-in escape hatch for broken local CA stores; only ever applied to public, credential-free fetches."""
+        return os.getenv("AUDITWHY_ALLOW_INSECURE_TLS", "false").strip().lower() in ("1", "true", "yes", "on")
 
 
 settings = Settings()

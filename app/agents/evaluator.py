@@ -1,15 +1,22 @@
-"""Agent 4: EvidenceEvaluatorAgent — Zetaris DQ Verification & Unsupported Claim Blocker."""
+"""Agent 4: EvidenceEvaluatorAgent — Zetaris DQ verification and provenance gate on analyst claims."""
 
 from __future__ import annotations
 
+from typing import Any, Dict, List
+
 from app.adapters.zetaris import ZetarisClient
+from app.analytics import fmt_usd
 from app.llm import LLMRouter
 from app.orchestration.state import InvestigationState
 from app.tracing import TraceLogger
 
+DQ_SQL = "SHOW DQ ALL INVALID TABLE lightning.metastore.usl_demo.sic_edgar_usl"
+MIN_CORRELATION = 0.7
+MIN_CORRELATION_SAMPLES = 5
+
 
 class EvidenceEvaluatorAgent:
-    """Critiques retrieved evidence via Zetaris DQ rules and blocks unverified analyst claims."""
+    """Independently re-checks evidence: runs its own DQ query and blocks claims that lack row-level provenance."""
 
     name = "EvidenceEvaluatorAgent"
 
@@ -24,97 +31,151 @@ class EvidenceEvaluatorAgent:
         self.trace = trace_logger
 
     def evaluate_data_quality(self, state: InvestigationState) -> InvestigationState:
-        """Critique & Revision Loop 1:
-        Independently executes `SHOW DQ ALL INVALID TABLE lightning.metastore.usl_demo.sic_edgar_usl`.
-        Detects the IBM SIC 3570 foreign-key orphan and triggers revision if not yet reconciled.
+        """Critique & Revision Loop 1.
+
+        Runs fk_sic_check independently of the retriever and compares the orphans it reports against the filings
+        actually present in the joined evidence. Any orphan missing from the join means the join silently dropped
+        data, so the plan is sent back for revision.
         """
-        dq_sql = "SHOW DQ ALL INVALID TABLE lightning.metastore.usl_demo.sic_edgar_usl"
-        dq_res = self.zetaris.run_sql(
-            dq_sql,
-            contract=state.execution_contract,
-            tool_name="verify_dq",
-            agent_name=self.name,
-        )
+        dq_res = self.zetaris.run_sql(DQ_SQL, contract=state.execution_contract, tool_name="verify_dq", agent_name=self.name)
         state.dq_invalid_rows = dq_res["rows"]
-        state.sql_history.append(dq_sql)
-
-        has_ibm_joined = any(r.get("cik") == "0000051143" for r in state.edgar_sic_joined_rows)
-        llm_eval = self.llm.generate(
-            task="evaluate",
-            system_prompt="You are EvidenceEvaluatorAgent. Audit Zetaris Data Quality foreign-key checks.",
-            user_prompt=f"DQ invalid rows: {len(state.dq_invalid_rows)}, has_ibm_joined={has_ibm_joined}",
-            context_data={"stage": "dq_check", "orphan_cik": "0000051143"},
+        # Zero orphans is a valid, evidence-bearing result for a DQ rule (it proves the join is clean).
+        state.datasets["dq_fk_sic_check"] = {**dq_res, "empty_is_evidence": True}
+        state.sql_history.append(DQ_SQL)
+        state.evidence_ledger.append(
+            {
+                "pass": state.retriever_pass,
+                "agent": self.name,
+                "purpose": "dq_fk_sic_check",
+                "hypotheses": ["H2"],
+                "tables": ["lightning.metastore.usl_demo.sic_edgar_usl"],
+                "sql": DQ_SQL,
+                "status": dq_res["status"],
+                "row_count": dq_res["row_count"],
+                "engine": dq_res.get("execution_engine"),
+            }
         )
 
-        if not has_ibm_joined:
+        # A filer counts only if it carries a leaf: the hierarchy-aware join is a LEFT JOIN, so a bad mapping still
+        # returns the row with a NULL leaf and would otherwise look reconciled.
+        joined_ciks = {r.get("cik") for r in state.edgar_sic_joined_rows if r.get("leaf_sic_code")}
+        dropped = [o for o in state.dq_invalid_rows if o.get("cik") not in joined_ciks]
+        state.dq_orphans_dropped = dropped
+        is_first_check = not state.dq_revision_triggered
+
+        if dropped:
+            lost_revenue = sum(int(o.get("revenue_2025") or 0) for o in dropped)
+            detail = "; ".join(
+                f"{o.get('ticker')} (CIK {o.get('cik')}) reports summary SIC {o.get('invalid_sic_code')}, "
+                f"{fmt_usd(o.get('revenue_2025'))} FY2025 revenue"
+                for o in dropped
+            )
+            reason = (
+                f"fk_sic_check flagged {len(state.dq_invalid_rows)} orphan(s); {len(dropped)} missing from the EDGAR x SIC "
+                f"join ({detail}). Naive join understates cohort revenue by {fmt_usd(lost_revenue)}."
+            )
             state.dq_revision_triggered = True
             state.dq_reconciled = False
-            self.trace.log(
-                agent_name=self.name,
-                action="detect_zetaris_dq_sic_3570_orphan",
-                input_summary=f"Ran `{dq_sql}` on Pass 1 join ({len(state.edgar_sic_joined_rows)} of 7 Group 357 accounts matched)",
-                output_summary=(
-                    f"{llm_eval['content']} | Emitting needs_revision to PlannerAgent & DataRetrieverAgent "
-                    f"to expand SIC 357% hierarchy and restore IBM ($62.753B revenue)."
-                ),
-                target_agent="PlannerAgent",
-                confidence=0.99,
-                retry_count=1,
-                status="needs_revision",
-                sponsor_tech="zetaris",
-            )
+            state.analyst_draft["dq_revision_reason"] = reason
+            fallback = f"needs_revision: {reason}"
+            status, target, conf = "needs_revision", "PlannerAgent", 0.99
+            action = "detect_zetaris_dq_orphan"
         else:
             state.dq_reconciled = True
-            self.trace.log(
-                agent_name=self.name,
-                action="verify_warm_dq_reconciliation",
-                input_summary=f"Ran `{dq_sql}`; verified H-MEM rule already reconciled IBM CIK 0000051143 in Pass 1",
-                output_summary=(
-                    "All 7 Computer & Office Equipment accounts (including IBM $62.753B under 3570->3571) "
-                    "are present and verified in Pass 1 via H-MEM compounding."
-                ),
-                target_agent="MarkovianAnalystAgent",
-                confidence=0.99,
-                retry_count=0,
-                status="success",
-                sponsor_tech="zetaris",
-            )
+            if not state.dq_invalid_rows:
+                fallback = "fk_sic_check returned 0 orphans: every EDGAR SIC joins to a 4-digit leaf."
+            elif is_first_check and state.learned_sic_rules:
+                fallback = (
+                    f"All {len(state.dq_invalid_rows)} fk_sic_check orphan(s) already present in the Pass 1 join via "
+                    f"H-MEM rule(s) {sorted(state.learned_sic_rules)}; no revision needed."
+                )
+            else:
+                fallback = (
+                    f"Re-verified after revision: all {len(state.dq_invalid_rows)} fk_sic_check orphan(s) "
+                    f"({', '.join(str(o.get('ticker')) for o in state.dq_invalid_rows)}) are now present in the join."
+                )
+            status, target, conf = "success", "MarkovianAnalystAgent", 0.99
+            action = "verify_warm_dq_reconciliation" if (is_first_check and state.learned_sic_rules) else "verify_dq_reconciliation"
+
+        llm_eval = self.llm.generate(
+            task="evaluate",
+            system_prompt="You are EvidenceEvaluatorAgent. Summarize this Zetaris Data Quality verdict in one sentence; do not change it.",
+            user_prompt=fallback,
+            fallback_text=fallback,
+        )
+        self.trace.log(
+            agent_name=self.name,
+            action=action,
+            input_summary=(
+                f"Ran `{DQ_SQL}` against {len(state.edgar_sic_joined_rows)} joined filings "
+                f"(retriever pass {state.retriever_pass})"
+            ),
+            output_summary=llm_eval["content"],
+            target_agent=target,
+            confidence=conf,
+            retry_count=state.plan_revision_count,
+            status=status,
+            sponsor_tech="zetaris",
+        )
         return state
 
     def evaluate_analyst_claims(self, state: InvestigationState) -> InvestigationState:
-        """Critique & Revision Loop 2:
-        Audits MarkovianAnalystAgent's candidate findings against Zetaris table provenance.
-        Blocks the H4 pricing-change claim because `erp.pricing_tier_changes` returned 0 rows.
-        """
-        pricing_row_count = len(state.pricing_rows)
-        has_tentative_pricing_claim = bool(state.analyst_draft.get("includes_pricing_claim", False))
+        """Critique & Revision Loop 2: gate every candidate claim on provenance, then on statistics."""
+        verdicts: Dict[str, Dict[str, Any]] = {}
+        blocked: List[Dict[str, Any]] = []
+        for claim in state.candidate_claims:
+            required = claim.get("requires", [])
+            missing = [p for p in required if not state.dataset_has_evidence(p)]
+            if missing:
+                evidence = [
+                    f"{p}: {(state.datasets.get(p) or {}).get('status', 'NOT_RUN')}, "
+                    f"{(state.datasets.get(p) or {}).get('row_count', 0)} rows"
+                    for p in missing
+                ]
+                verdict = {"verdict": "blocked", "reason": f"No row-level provenance ({'; '.join(evidence)})."}
+                blocked.append(claim)
+            elif claim.get("statistic") == "pearson_r":
+                r = float(claim.get("value") or 0.0)
+                n = int(claim.get("n") or 0)
+                if n >= MIN_CORRELATION_SAMPLES and abs(r) >= MIN_CORRELATION:
+                    verdict = {"verdict": "supported_correlational", "reason": f"|r|={abs(r):.3f} >= {MIN_CORRELATION} with n={n}."}
+                else:
+                    verdict = {"verdict": "inconclusive", "reason": f"|r|={abs(r):.3f}, n={n} below the {MIN_CORRELATION}/{MIN_CORRELATION_SAMPLES} bar."}
+            else:
+                verdict = {"verdict": "supported", "reason": "All required datasets returned rows."}
+            verdicts[claim["claim_id"]] = {**verdict, "hypothesis_id": claim.get("hypothesis_id"), "statement": claim["statement"]}
+        state.claim_verdicts = verdicts
 
+        for claim in blocked:
+            state.unsupported_claims_blocked.append(
+                f"{claim.get('hypothesis_id') or claim['claim_id']}: {claim['statement']} -> {verdicts[claim['claim_id']]['reason']}"
+            )
+
+        supported = sum(1 for v in verdicts.values() if v["verdict"].startswith("supported"))
+        fallback = (
+            f"Audited {len(verdicts)} candidate claim(s): {supported} supported, "
+            f"{sum(1 for v in verdicts.values() if v['verdict'] == 'inconclusive')} inconclusive, {len(blocked)} blocked"
+            + (f" ({'; '.join(c['claim_id'] for c in blocked)})" if blocked else "")
+            + ". Blocked claims must move to untested_factors."
+        )
         llm_eval = self.llm.generate(
             task="evaluate",
-            system_prompt="You are EvidenceEvaluatorAgent. Block any causal claim lacking Zetaris row provenance.",
-            user_prompt=f"Verify Analyst candidate claims; pricing_row_count={pricing_row_count}",
-            context_data={"stage": "claim_verification", "row_count": pricing_row_count},
+            system_prompt="You are EvidenceEvaluatorAgent. Summarize the claim audit in one sentence; never un-block a claim.",
+            user_prompt=fallback,
+            fallback_text=fallback,
         )
-
-        if has_tentative_pricing_claim and pricing_row_count == 0:
-            state.unsupported_claims_blocked.append(
-                "H4 (Enterprise Pricing-Tier Increase Hypothesis): Blocked due to 0 rows in Zetaris pricing tables."
-            )
-            self.trace.log(
-                agent_name=self.name,
-                action="flag_unsupported_claim",
-                input_summary=(
-                    "Audited MarkovianAnalystAgent draft claiming H4 (pricing-tier changes) contributed to Q3 churn "
-                    "against Zetaris provenance (`erp.pricing_tier_changes` row_count=0)"
-                ),
-                output_summary=(
-                    f"{llm_eval['content']} | Rejected unverified H4 pricing claim; ordered MarkovianAnalystAgent "
-                    "to strip claim and reclassify H4 into untested_factors."
-                ),
-                target_agent="MarkovianAnalystAgent",
-                confidence=0.98,
-                retry_count=1,
-                status="partial_success",
-                sponsor_tech="nvidia_nemotron",
-            )
+        self.trace.log(
+            agent_name=self.name,
+            action="flag_unsupported_claim" if blocked else "approve_analyst_claims",
+            input_summary=(
+                f"Audited {len(verdicts)} MarkovianAnalystAgent claims against the evidence ledger "
+                f"({len(state.evidence_ledger)} Zetaris queries)"
+            ),
+            output_summary=llm_eval["content"],
+            target_agent="MarkovianAnalystAgent",
+            confidence=0.98,
+            retry_count=1 if blocked else 0,
+            status="partial_success" if blocked else "success",
+            sponsor_tech="nvidia_nemotron",
+        )
         return state

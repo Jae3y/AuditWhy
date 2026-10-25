@@ -2,14 +2,40 @@
 
 from __future__ import annotations
 
+import re
+from typing import Any, Dict, List
+
+from app.agents.reviewer import SIC_RULE_TYPE, sic_rule_record_id
 from app.engines.hmem import HMemEngine, MemoryRecord
 from app.engines.scout_intent import ScoutIntentEngine
 from app.orchestration.state import InvestigationState
 from app.tracing import TraceLogger
 
+# Prior-session knowledge used only when a caller explicitly asks for a warm start (warm_memory_seed=true) on an
+# empty store, so example_2 is reproducible on a fresh clone. It is labelled as a fixture in provenance and trace.
+SEED_SIC_RULE: Dict[str, Any] = {
+    "summary_code": "3570",
+    "leaf_code": "3571",
+    "leaf_description": "Electronic Computers",
+    "hierarchy": "Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers)",
+    "ciks": ["0000051143"],
+    "ticker": "IBM",
+    "restored_revenue_usd": 62753000000,
+}
+
+# Every investigation joins EDGAR to the SIC taxonomy (H2), so taxonomy rules are always in scope for recall.
+PLAN_SCOPE_TAGS = ["zetaris", "taxonomy", "sic"]
+
+
+def _query_entities(query: str) -> List[str]:
+    """CIKs, SIC codes and ticker-like tokens mentioned in the query (used as H-MEM entity signals)."""
+    found = re.findall(r"\b\d{10}\b|\b\d{4}\b", query)
+    found += [t for t in re.findall(r"\b[A-Z]{2,5}\b", query) if t not in {"SEC", "SIC", "ARR", "SLA", "API", "ERP", "USL", "DQ"}]
+    return list(dict.fromkeys(found))
+
 
 class ScoutGuardAgent:
-    """Screens incoming queries via Scout Intent, retrieves prior H-MEM rules, and issues HMAC-SHA256 ExecutionContracts."""
+    """Screens incoming queries via Scout Intent, recalls H-MEM rules, and issues HMAC-SHA256 ExecutionContracts."""
 
     name = "ScoutGuardAgent"
 
@@ -23,6 +49,55 @@ class ScoutGuardAgent:
         self.hmem = hmem_engine
         self.trace = trace_logger
 
+    def _run_conflict_test(self, state: InvestigationState, cfg: Dict[str, Any]) -> None:
+        """Safe post-block check: a low-trust contradicting claim must lose to the incumbent high-trust fact."""
+        entity = str(cfg.get("entity") or SEED_SIC_RULE["ticker"])
+        cik = str(cfg.get("cik") or SEED_SIC_RULE["ciks"][0])
+        code = str(cfg.get("sic_code") or SEED_SIC_RULE["summary_code"])
+        incumbent = next((r for r in self.hmem.store.active_rules(SIC_RULE_TYPE) if r.provenance["rule"].get("summary_code") == code), None)
+        if incumbent is None:
+            incumbent = self.hmem.store.create(
+                MemoryRecord(
+                    id=f"mem-conflict-verified-{code}",
+                    content=f"{entity} SIC {code} is a summary header reconciled to a 4-digit leaf code by fk_sic_check.",
+                    type="factual",
+                    layer="long_term",
+                    confidence=0.96,
+                    source="zetaris_dq_fk_sic_check",
+                    domain="taxonomy",
+                    entities=[entity, cik, code],
+                    runId=state.run_id,
+                )
+            )
+        challenger = MemoryRecord(
+            id=f"mem-conflict-unverified-{code}",
+            content=f"{entity} SIC {code} is a valid 4-digit leaf code requiring no reconciliation (0% revenue impact).",
+            type="factual",
+            layer="short_term",
+            confidence=0.42,
+            source="unverified_external_note",
+            domain="taxonomy",
+            entities=[entity, cik, code],
+            runId=state.run_id,
+        )
+        report = self.hmem.conflict.detect_and_resolve(challenger, run_id=state.run_id)
+        self.hmem.store.create(challenger)
+        state.conflict_resolution_report = {**report, "incumbent_id": incumbent.id, "challenger_id": challenger.id}
+        self.trace.log(
+            agent_name=self.name,
+            action="resolve_hmem_entity_conflict",
+            input_summary=f"Post-block H-MEM ConflictDetectionService check on {entity}/SIC {code}",
+            output_summary=(
+                f"Found {report['conflicts_found']} conflict(s); high-trust '{incumbent.id}' ({incumbent.confidence}) "
+                f"retained over low-trust claim ({challenger.confidence}); challenger supersededBy={challenger.supersededBy}."
+            ),
+            target_agent="None",
+            confidence=incumbent.confidence,
+            retry_count=0,
+            status="success",
+            sponsor_tech="meterless_hmem",
+        )
+
     def execute(self, state: InvestigationState) -> InvestigationState:
         eval_res = self.scout.evaluate(
             state.user_query,
@@ -35,10 +110,11 @@ class ScoutGuardAgent:
 
         if eval_res["blocked"]:
             state.blocked = True
+            failed = {k: v for k, v in eval_res["risk"]["layers"].items() if not v.get("passed", True)}
             violations = eval_res["risk"]["layers"]["layer1_prompt_injection"]["violations"]
             state.block_reason = (
                 f"Scout Intent 5-Layer Guard intercepted adversarial input "
-                f"(violations={violations}). Tool execution contract denied."
+                f"(failed layers={sorted(failed)}, violations={violations}). Tool execution contract denied."
             )
             self.trace.log(
                 agent_name=self.name,
@@ -51,53 +127,11 @@ class ScoutGuardAgent:
                 status="blocked",
                 sponsor_tech="meterless_scout",
             )
-
-            # Check if a safe follow-up H-MEM conflict resolution check was requested alongside the adversarial test
             conflict_cfg = state.context.get("follow_up_conflict_test")
             if isinstance(conflict_cfg, dict) and conflict_cfg.get("enabled"):
-                low_rec = MemoryRecord(
-                    id="mem-conflict-unverified-3570",
-                    content="IBM SIC 3570 is a valid 4-digit leaf code requiring no reconciliation (0% revenue drop).",
-                    type="factual",
-                    layer="short_term",
-                    confidence=0.42,
-                    source="unverified_external_note",
-                    domain="taxonomy",
-                    entities=["IBM", "0000051143", "SIC_3570"],
-                    runId=state.run_id,
-                )
-                self.hmem.store.create(low_rec)
-                high_rec = MemoryRecord(
-                    id="mem-conflict-verified-3570",
-                    content="IBM SIC 3570 is a 3-digit Industry Group summary header reconciled to 3571 ($62.753B revenue).",
-                    type="factual",
-                    layer="long_term",
-                    confidence=0.96,
-                    source="zetaris_dq_fk_sic_check",
-                    domain="taxonomy",
-                    entities=["IBM", "0000051143", "SIC_3570"],
-                    runId=state.run_id,
-                )
-                conflict_res = self.hmem.conflict.detect_and_resolve(high_rec, run_id=state.run_id)
-                self.hmem.store.create(high_rec)
-                state.conflict_resolution_report = conflict_res
-                self.trace.log(
-                    agent_name=self.name,
-                    action="resolve_hmem_entity_conflict",
-                    input_summary="Executed safe post-block H-MEM ConflictDetectionService verification on entity IBM/SIC_3570",
-                    output_summary=(
-                        f"Resolved {conflict_res['conflicts_found']} conflict(s); "
-                        f"high-trust Zetaris DQ fact (0.96) superseded low-trust claim (0.42)."
-                    ),
-                    target_agent="None",
-                    confidence=0.96,
-                    retry_count=0,
-                    status="success",
-                    sponsor_tech="meterless_hmem",
-                )
+                self._run_conflict_test(state, conflict_cfg)
             return state
 
-        # Valid query -> issue signed contract trace event
         self.trace.log(
             agent_name=self.name,
             action="issue_signed_execution_contract",
@@ -107,70 +141,88 @@ class ScoutGuardAgent:
                 f"signedBy=scout TTL=300s tools={state.execution_contract.allowed_tools}"
             ),
             target_agent="PlannerAgent",
-            confidence=0.98,
+            confidence=max(0.5, eval_res["score"]),
             retry_count=0,
             status="success",
             sponsor_tech="meterless_scout",
         )
 
-        # If warm_memory_seed is requested and H-MEM doesn't have the rule yet, seed it from prior session knowledge
-        q_lower = state.user_query.lower()
-        wants_warm = bool(state.context.get("warm_memory_seed")) or (
-            "re-evaluate" in q_lower and "resolved sic taxonomy" in q_lower
-        )
-        if wants_warm and not any("3570" in r.content for r in self.hmem.store.all_records()):
+        seeded = False
+        if state.memory_mode == "warm" and not self.hmem.store.active_rules(SIC_RULE_TYPE):
+            seed = SEED_SIC_RULE
             self.hmem.mining.mine_fact(
                 content=(
-                    "Reconciliation Rule [SIC-3570-LEAF]: SEC EDGAR CIK 0000051143 (IBM) reports 3-digit "
-                    "Industry Group summary SIC code 3570 ('Computer and Office Equipment'). Map 3570 -> "
-                    "Division D / Major Group 35 / Industry Group 357 leaf 3571 ('Electronic Computers') "
-                    "to prevent dropping $62.753B FY2025 revenue in Zetaris USL joins."
+                    f"Reconciliation Rule [SIC-{seed['summary_code']}-LEAF]: SEC EDGAR CIK {seed['ciks'][0]} ({seed['ticker']}) "
+                    f"reports summary SIC code {seed['summary_code']}. Map {seed['summary_code']} -> {seed['hierarchy']} to prevent "
+                    f"dropping $62.753B FY2025 revenue in Zetaris USL joins."
                 ),
                 source="zetaris_usl_dq:fk_sic_check",
                 confidence=0.95,
                 domain="taxonomy",
                 layer="long_term",
                 memory_type="procedural",
-                tags=["zetaris", "sic_3570", "3571", "ibm", "taxonomy", "enterprise"],
-                entities=["IBM", "0000051143", "3570", "3571", "sic"],
+                tags=["zetaris", "taxonomy", "sic", f"sic_{seed['summary_code']}", seed["leaf_code"], seed["ticker"].lower(), "enterprise"],
+                entities=[seed["ticker"], seed["ciks"][0], seed["summary_code"], seed["leaf_code"], "sic"],
+                agent_id=self.name,
                 run_id=state.run_id,
-                record_id="mem-sic-3570-reconciliation-rule",
+                record_id=sic_rule_record_id(seed["summary_code"]),
+                rule={"rule_type": SIC_RULE_TYPE, **{k: v for k, v in seed.items() if k != "ticker"}, "seeded_from": "prior_session_fixture"},
             )
+            seeded = True
 
         retrieved = self.hmem.retrieval.retrieve(
             state.user_query,
-            query_tags=["zetaris", "sic_3570", "taxonomy", "enterprise"],
+            query_tags=PLAN_SCOPE_TAGS,
             query_domain="taxonomy",
-            query_entities=["IBM", "0000051143", "3570", "3571"],
+            query_entities=_query_entities(state.user_query),
             threshold=0.35,
             top_n=5,
             run_id=state.run_id,
         )
         state.retrieved_memories = retrieved
 
-        has_sic_rule = any(
-            "3570" in item["record"]["content"] and "3571" in item["record"]["content"]
-            for item in retrieved.get("memories", [])
-        )
-        # Only activate warm shortcut if the query or options indicate warm compounding or H-MEM rule + warm query
-        if has_sic_rule and (wants_warm or state.context.get("warm_memory_seed") is True):
+        rules = []
+        for item in retrieved.get("memories", []):
+            rec = item["record"]
+            rule = (rec.get("provenance") or {}).get("rule") or {}
+            if (
+                rule.get("rule_type") == SIC_RULE_TYPE
+                and rec["confidence"] >= 0.85
+                and not rec.get("supersededBy")
+                and "needs_review" not in rec.get("tags", [])
+            ):
+                rules.append((item, rule))
+
+        if state.memory_mode != "cold" and rules:
             state.warm_mode = True
-            mem_lines = [
-                f"[H-MEM {m['record']['id']} score={m['score']:.3f} conf={m['record']['confidence']}]: {m['record']['content']}"
-                for m in retrieved["memories"]
-            ]
-            state.memory_context_str = "\n".join(mem_lines)
+            for item, rule in rules:
+                state.learned_sic_rules[rule["summary_code"]] = {
+                    "leaf_code": rule["leaf_code"],
+                    "leaf_description": rule.get("leaf_description", ""),
+                    "hierarchy": rule.get("hierarchy", ""),
+                    "ciks": list(rule.get("ciks") or []),
+                    "record_id": item["record"]["id"],
+                    "confidence": item["record"]["confidence"],
+                    "candidates": [rule["leaf_code"]],
+                }
+            state.memory_context_str = "\n".join(
+                f"[H-MEM {item['record']['id']} score={item['score']:.3f} conf={item['record']['confidence']}]: {item['record']['content']}"
+                for item, _ in rules
+            )
 
         self.trace.log(
             agent_name=self.name,
             action="retrieve_hmem_context",
-            input_summary=f"Queried H-MEM 8-factor hybrid retrieval for '{state.user_query[:90]}'",
+            input_summary=f"8-factor H-MEM recall for '{state.user_query[:90]}' (memory_mode={state.memory_mode}, fixture_seeded={seeded})",
             output_summary=(
-                f"Retrieved {retrieved['total_matches']} memory record(s) above threshold 0.35 "
-                f"(warm_mode={state.warm_mode})."
+                f"Recalled {retrieved['total_matches']} record(s) above 0.35; {len(rules)} high-trust structured rule(s) "
+                f"{'applied' if state.warm_mode else 'not applied'}"
+                + (f": {', '.join(f'{c}->{r['leaf_code']}' for c, r in state.learned_sic_rules.items())}" if state.warm_mode else "")
+                + (" (cold baseline requested)" if state.memory_mode == "cold" and rules else "")
+                + "."
             ),
             target_agent="PlannerAgent",
-            confidence=0.95,
+            confidence=max((item["score"] for item, _ in rules), default=0.9),
             retry_count=0,
             status="success",
             sponsor_tech="meterless_hmem",

@@ -2,19 +2,32 @@
 
 from __future__ import annotations
 
+import re
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from app.adapters.sample_data import SampleZetarisEngine
+from app.adapters.sample_data import SampleZetarisEngine, get_shared_sample_engine
 from app.config import settings
 from app.engines.scout_intent import ExecutionContract, ScoutIntentEngine
 from app.tracing import TraceLogger
 
+# Statement types an analyst may run interactively. Zetaris USL/DQ DDL is reserved for the setup pipeline.
+READ_ONLY_STATEMENT = re.compile(r"^\s*(?:SELECT|WITH|SHOW|EXPLAIN|DESCRIBE)\b", re.IGNORECASE)
+
 
 class ZetarisSQLValidationError(ValueError):
     """Raised when a query violates Zetaris Lightning SQL single-statement rules."""
+
+
+def assert_read_only_sql(sql: str) -> None:
+    """Reject anything other than a read statement (defence in depth on top of the warehouse authorizer)."""
+    if not READ_ONLY_STATEMENT.match(sql or ""):
+        raise ZetarisSQLValidationError(
+            "Only read-only statements (SELECT, WITH, SHOW, EXPLAIN, DESCRIBE) are permitted here."
+        )
 
 
 def sanitize_zetaris_sql(sql: str) -> str:
@@ -59,6 +72,8 @@ class ZetarisClient:
         sample_mode: Optional[bool] = None,
         scout_engine: Optional[ScoutIntentEngine] = None,
         trace_logger: Optional[TraceLogger] = None,
+        sample_dir: Optional[Path] = None,
+        sample_engine: Optional[SampleZetarisEngine] = None,
     ) -> None:
         base = (rest_url or settings.zetaris_rest_url).strip()
         if ":8889" in base:
@@ -69,7 +84,7 @@ class ZetarisClient:
         self.sample_mode = sample_mode if sample_mode is not None else settings.sample_mode
         self.scout_engine = scout_engine
         self.trace_logger = trace_logger
-        self.sample_engine = SampleZetarisEngine()
+        self.sample_engine = sample_engine or get_shared_sample_engine(sample_dir)
         self.executed_queries: List[Dict[str, Any]] = []
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=8), reraise=True)
@@ -108,18 +123,21 @@ class ZetarisClient:
         contract: Optional[ExecutionContract | Dict[str, Any]] = None,
         tool_name: str = "query_zetaris",
         agent_name: str = "DataRetrieverAgent",
+        read_only: bool = False,
     ) -> Dict[str, Any]:
         """Validate contract (if scout_engine configured), sanitize SQL, and execute against Zetaris or SampleZetarisEngine."""
         if self.scout_engine is not None:
             self.scout_engine.verify_contract_for_tool(contract, tool_name)
 
         cleaned_sql = sanitize_zetaris_sql(sql)
+        if read_only:
+            assert_read_only_sql(cleaned_sql)
 
         if not self.sample_mode and self.api_key:
             try:
                 res = self._post_live_sql(cleaned_sql, limit)
                 self.executed_queries.append(
-                    {"sql": cleaned_sql, "mode": "live_zetaris", "row_count": res["row_count"]}
+                    {"sql": cleaned_sql, "mode": "live_zetaris", "status": res["status"], "row_count": res["row_count"]}
                 )
                 return res
             except Exception as exc:
@@ -138,7 +156,7 @@ class ZetarisClient:
 
         res = self.sample_engine.execute_sql(cleaned_sql, limit=limit)
         self.executed_queries.append(
-            {"sql": cleaned_sql, "mode": "sample_zetaris", "row_count": res["row_count"]}
+            {"sql": cleaned_sql, "mode": "sample_zetaris", "status": res["status"], "row_count": res["row_count"]}
         )
         return res
 

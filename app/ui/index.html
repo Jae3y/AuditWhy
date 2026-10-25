@@ -168,7 +168,9 @@
     }
     .st-success { background: rgba(34,197,94,0.18); color: var(--green); }
     .st-needs_revision, .st-retrying, .st-partial_success, .st-fallback { background: rgba(245,158,11,0.18); color: var(--amber); }
-    .st-blocked { background: rgba(239,68,68,0.18); color: var(--red); }
+    .st-blocked, .st-error, .st-blocked_untested, .st-refuted { background: rgba(239,68,68,0.18); color: var(--red); }
+    .st-verified, .st-reconciled_after_dq_fix { background: rgba(34,197,94,0.18); color: var(--green); }
+    .st-inconclusive, .st-pending { background: rgba(245,158,11,0.18); color: var(--amber); }
     .trace-table { width: 100%; border-collapse: collapse; font-size: 0.81rem; }
     .trace-table th, .trace-table td {
       text-align: left;
@@ -227,12 +229,20 @@
       <section class="controls">
         <div class="preset-bar">
           <button onclick="loadPreset(1)">Example 1: Cold Run (Catches IBM SIC 3570 Orphan &amp; Blocks H4 Pricing)</button>
-          <button onclick="loadPreset(2)">Example 2: Warm Compounding (H-MEM Chunk-0 Recall &rarr; 2 Markovian Chunks)</button>
+          <button onclick="loadPreset(2)">Example 2: Warm Compounding (H-MEM Chunk-0 Recall &rarr; Skips Taxonomy Stage)</button>
           <button onclick="loadPreset(3)">Example 3: Adversarial Injection &amp; Conflict Test (Scout 5-Layer Block)</button>
           <button class="primary" onclick="runInvestigation()">Run 6-Agent Investigation (POST /run)</button>
           <button onclick="downloadLastReport()">Export JSON Report</button>
         </div>
         <textarea id="query-box">Why did Q3 enterprise retention drop across our Computer & Office Equipment accounts, and how do SEC EDGAR revenues compare with our internal support escalation and billing tables?</textarea>
+        <div style="display:flex; gap:10px; align-items:center; margin-bottom: 8px; font-size: 0.82rem; color: var(--muted);">
+          <label for="memory-mode" style="margin:0;">H-MEM policy</label>
+          <select id="memory-mode" style="background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px;">
+            <option value="auto">auto: apply recalled high-trust rules</option>
+            <option value="cold">cold: recall only, force discovery</option>
+            <option value="warm">warm: seed fixture if empty, then apply</option>
+          </select>
+        </div>
         <div style="font-size: 0.82rem; color: var(--muted);" id="run-status">Ready. Select an example preset or enter any custom discrepancy investigation query.</div>
       </section>
 
@@ -247,7 +257,7 @@
           <h2>Zetaris USL, DQ (`fk_sic_check`) &amp; Multivariate Correlations</h2>
           <div id="zetaris-panel">
             <div class="kv"><span>USL Table &amp; DQ Rule</span><span>sic_edgar_usl &bull; fk_sic_check</span></div>
-            <div class="kv"><span>Orphan Caught &amp; Reconciled</span><span>IBM (0000051143) &bull; SIC 3570 &rarr; 3571 ($62.75B)</span></div>
+            <div class="kv"><span>Orphans Caught &amp; Reconciled</span><span id="orphan-line">-</span></div>
             <div class="kv"><span>Pearson r (Timeout % vs Churn)</span><span id="corr-timeout">-</span></div>
             <div class="kv"><span>Pearson r (p99 Latency vs Churn)</span><span id="corr-lat">-</span></div>
             <div class="kv"><span>Pearson r (P1 Tickets vs Churn)</span><span id="corr-p1">-</span></div>
@@ -383,6 +393,8 @@
           <label>Zetaris REST URL (`http://localhost:8888/api/v1.0`) &amp; API Key</label>
           <input type="text" id="cfg-zt-url" placeholder="http://localhost:8888/api/v1.0" />
           <input type="password" id="cfg-zt-key" placeholder="Zetaris Bearer Token" />
+          <label>Admin Token (only needed when not browsing from localhost, e.g. Docker)</label>
+          <input type="password" id="cfg-admin-token" placeholder="AUDITWHY_ADMIN_TOKEN" />
           <div style="display:flex; gap:10px; align-items:center; margin: 10px 0;">
             <input type="checkbox" id="cfg-live-mode" />
             <span style="font-size: 0.85rem;">Enable Live External Mode (`SAMPLE_MODE=false`)</span>
@@ -403,6 +415,18 @@
   <script>
     let currentPreset = 1;
     let lastReportData = null;
+
+    // Every server-supplied string is escaped before it touches innerHTML: trace summaries echo the user's
+    // query and, in live mode, model output, so unescaped interpolation would be a script-injection path.
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    }
+    function cls(value) {
+      return String(value ?? "").replace(/[^a-z0-9_-]/gi, "");
+    }
+    function usd(v) {
+      return "$" + Number(v || 0).toLocaleString();
+    }
     const presets = {
       1: {
         run_id: "ui-cold-run-001",
@@ -442,10 +466,10 @@
         const r = await fetch("/health");
         const d = await r.json();
         document.getElementById("health-badges").innerHTML = `
-          <span class="badge">Service: ${d.service} (${d.status})</span>
-          <span class="badge">Sample Mode: ${d.sample_mode}</span>
-          <span class="badge">Provider: ${d.provider_status}</span>
-          <span class="badge">Zetaris: ${d.zetaris_status}</span>
+          <span class="badge">Service: ${esc(d.service)} v${esc(d.version)} (${esc(d.status)})</span>
+          <span class="badge">Sample Mode: ${esc(d.sample_mode)}</span>
+          <span class="badge">Provider: ${esc(d.provider_status)}</span>
+          <span class="badge">Zetaris: ${esc(d.zetaris_status)}</span>
         `;
       } catch (e) {}
     }
@@ -453,6 +477,8 @@
     function loadPreset(n) {
       currentPreset = n;
       document.getElementById("query-box").value = presets[n].input.query;
+      const seed = presets[n].options.warm_memory_seed;
+      document.getElementById("memory-mode").value = seed === true ? "warm" : (seed === false ? "cold" : "auto");
       document.getElementById("run-status").textContent = `Loaded Example ${n}. Click "Run 6-Agent Investigation" to execute.`;
     }
 
@@ -462,23 +488,34 @@
       const payload = JSON.parse(JSON.stringify(base));
       payload.input.query = q;
       payload.run_id = `run-${Date.now()}`;
+      const mode = document.getElementById("memory-mode").value;
+      if (mode === "auto") delete payload.options.warm_memory_seed;
+      else payload.options.warm_memory_seed = mode === "warm";
 
       document.getElementById("run-status").textContent = "Executing 6-Agent State Machine + 4 Meterless Engines + Zetaris SQL...";
-      const res = await fetch("/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      lastReportData = data;
-      renderResult(data);
+      try {
+        const res = await fetch("/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          document.getElementById("run-status").textContent = `Request rejected (${res.status}): ${typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)}`;
+          return;
+        }
+        lastReportData = data;
+        renderResult(data);
+      } catch (e) {
+        document.getElementById("run-status").textContent = `Network error: ${e}`;
+      }
     }
 
     function renderResult(data) {
       document.getElementById("run-status").textContent = `Completed run_id=${data.run_id} in ${data.duration_ms} ms (${data.trace_events.length} trace events).`;
       const stEl = document.getElementById("res-status");
       stEl.textContent = data.status;
-      stEl.className = `status-pill st-${data.status}`;
+      stEl.className = `status-pill st-${cls(data.status)}`;
       document.getElementById("exec-summary").textContent = data.executive_summary;
       document.getElementById("caveat-box").textContent = data.correlation_vs_causation_caveat || "";
 
@@ -499,6 +536,10 @@
       document.getElementById("corr-timeout").textContent = mc.timeout_rate_vs_retention_loss_r ?? "N/A";
       document.getElementById("corr-lat").textContent = mc.p99_latency_vs_retention_loss_r ?? "N/A";
       document.getElementById("corr-p1").textContent = mc.p1_escalations_vs_retention_loss_r ?? "N/A";
+      const tx = data.taxonomic_anomaly_resolution || {};
+      document.getElementById("orphan-line").textContent = (tx.orphans || []).length
+        ? tx.orphans.map(o => `${o.ticker} (${o.cik}) SIC ${o.edgar_sic_code} → ${o.reconciled_leaf_sic_code} (${usd(o.restored_fy2025_revenue_usd)})`).join("; ")
+        : (tx.status || "none");
 
       const sqls = (data.zetaris_lineage && data.zetaris_lineage.sql_queries) || [];
       document.getElementById("sql-preview").textContent = sqls.length ? sqls.join("\n\n") : "-- 0 SQL queries executed (Blocked by Scout Guard)";
@@ -513,8 +554,12 @@
       const sc = me.scout_intent || {};
 
       document.getElementById("hm-stat").textContent = `warm=${Boolean(hm.warm_mode_activated)} | retrieved=${hm.retrieved_count ?? 0}`;
-      document.getElementById("mk-chunks").textContent = mk.chunks_executed ? `${mk.chunks_executed} chunks (saved ${mk.cold_vs_warm_chunk_delta} chunks)` : "Blocked (0 chunks)";
-      document.getElementById("mk-eff").textContent = mk.efficiencyPercent ? `${mk.efficiencyPercent}% (${mk.totalTokensSaved} tokens saved)` : "N/A";
+      document.getElementById("mk-chunks").textContent = mk.chunks_executed
+        ? `${mk.chunks_executed} of ${mk.cold_baseline_chunks} stages [${(mk.stages || []).join(" → ")}]`
+        : "Blocked (0 chunks)";
+      document.getElementById("mk-eff").textContent = mk.efficiencyPercent
+        ? `${mk.efficiencyPercent}% measured (${mk.totalTokensSaved} tokens saved; spec projection ${mk.specProjectedEfficiencyPercent}%)`
+        : "N/A";
       document.getElementById("wm-ent").textContent = `${wm.total_entities ?? 0} deterministic ent_ entities`;
       document.getElementById("sc-sig").textContent = sc.contract && sc.contract.signature ? `${sc.contract.signature.slice(0, 16)}... (${sc.contract.signedBy})` : "N/A";
 
@@ -522,44 +567,49 @@
       const mat = (data.zetaris_lineage && data.zetaris_lineage.enterprise_360_matrix) || [];
       const mbody = document.getElementById("matrix-body");
       if (mat.length) {
-        mbody.innerHTML = mat.map(r => `
-          <tr class="${r.sic_code_edgar === '3570' ? 'highlight-orphan' : ''}">
-            <td><code>${r.cik}</code></td>
-            <td><strong>${r.ticker}</strong></td>
-            <td>${r.account_name}</td>
-            <td><span class="status-pill ${r.sic_code_edgar === '3570' ? 'st-needs_revision' : 'st-success'}">${r.sic_code_edgar}</span></td>
-            <td><strong>${r.reconciled_sic_leaf}</strong></td>
-            <td>$${Number(r.revenue_2025_usd || 0).toLocaleString()}</td>
-            <td>$${Number(r.q3_arr_usd || 0).toLocaleString()}</td>
-            <td>${r.q3_net_retention_pct}%</td>
-            <td style="color:${r.q3_arr_delta_usd < 0 ? 'var(--red)' : 'var(--green)'}">$${Number(r.q3_arr_delta_usd || 0).toLocaleString()}</td>
-            <td>${r.q3_p1_escalations}</td>
-            <td>${r.api_p99_latency_ms_q3} ms</td>
-            <td>${r.batch_sync_timeout_rate_pct}%</td>
-            <td>$${Number(r.weather_sla_exposure_usd || 0).toLocaleString()}</td>
-          </tr>
-        `).join("");
+        mbody.innerHTML = mat.map(r => {
+          const orphan = r.dq_status && r.dq_status !== "valid_leaf";
+          return `
+          <tr class="${orphan ? 'highlight-orphan' : ''}" style="${r.in_focus === false ? 'opacity:0.6' : ''}">
+            <td><code>${esc(r.cik)}</code></td>
+            <td><strong>${esc(r.ticker)}</strong></td>
+            <td>${esc(r.account_name)}</td>
+            <td><span class="status-pill ${orphan ? 'st-needs_revision' : 'st-success'}">${esc(r.sic_code_edgar)}</span></td>
+            <td><strong>${esc(r.reconciled_sic_leaf)}</strong></td>
+            <td>${usd(r.revenue_2025_usd)}</td>
+            <td>${usd(r.q3_arr_usd)}</td>
+            <td>${esc(r.q3_net_retention_pct)}%</td>
+            <td style="color:${r.q3_arr_delta_usd < 0 ? 'var(--red)' : 'var(--green)'}">${usd(r.q3_arr_delta_usd)}</td>
+            <td>${esc(r.q3_p1_escalations)}</td>
+            <td>${esc(r.api_p99_latency_ms_q3)} ms</td>
+            <td>${esc(r.batch_sync_timeout_rate_pct)}%</td>
+            <td>${usd(r.weather_sla_exposure_usd)}</td>
+          </tr>`;
+        }).join("");
       } else {
-        mbody.innerHTML = `<tr><td colspan="13" style="color:var(--red);">Blocked by Scout Intent Guard (0 queries executed).</td></tr>`;
+        mbody.innerHTML = `<tr><td colspan="13" style="color:var(--red);">${data.status === "blocked" ? "Blocked by Scout Intent Guard (0 queries executed)." : "No matrix produced for this run."}</td></tr>`;
       }
 
       const hyps = (data.hypotheses || []).map(h =>
-        `<div style="margin-bottom:10px;"><strong>${h.hypothesis_id}: ${h.title}</strong> <span class="status-pill st-${h.status === 'blocked_untested' ? 'blocked' : 'success'}">${h.status}</span><br/><span style="color:var(--muted)">${h.finding_summary}</span></div>`
+        `<div style="margin-bottom:10px;"><strong>${esc(h.hypothesis_id)}: ${esc(h.title)}</strong> <span class="status-pill st-${cls(h.status)}">${esc(h.status)}</span> <span style="color:var(--muted)">conf ${Number(h.confidence || 0).toFixed(2)}</span><br/><span style="color:var(--muted)">${esc(h.finding_summary)}</span></div>`
       ).join("");
-      document.getElementById("hypotheses-panel").innerHTML = hyps || `<span style="color:var(--red)">Execution halted by Scout Intent 5-Layer Security Guard before hypothesis execution.</span>`;
+      const untested = (data.untested_factors || []).map(u =>
+        `<div style="margin-bottom:6px; color:var(--amber);">UNTESTED ${esc(u.hypothesis_id)}: ${esc(u.title)} &mdash; needs ${esc(u.required_data_to_test)}</div>`
+      ).join("");
+      document.getElementById("hypotheses-panel").innerHTML = (hyps + untested) || `<span style="color:var(--red)">${data.status === "blocked" ? "Execution halted by Scout Intent 5-Layer Security Guard before hypothesis execution." : esc(data.executive_summary)}</span>`;
 
       const tbody = document.getElementById("trace-body");
       tbody.innerHTML = (data.trace_events || []).map((ev, idx) => `
         <tr>
           <td>${idx + 1}</td>
-          <td><strong>${ev.agent_name}</strong></td>
-          <td><code>${ev.action}</code></td>
-          <td>${ev.target_agent}</td>
-          <td><span class="status-pill st-${ev.status}">${ev.status}</span></td>
-          <td>${ev.sponsor_tech}</td>
-          <td>${ev.confidence.toFixed(2)}</td>
-          <td>${ev.retry_count}</td>
-          <td>${ev.output_summary}</td>
+          <td><strong>${esc(ev.agent_name)}</strong></td>
+          <td><code>${esc(ev.action)}</code></td>
+          <td>${esc(ev.target_agent)}</td>
+          <td><span class="status-pill st-${cls(ev.status)}">${esc(ev.status)}</span></td>
+          <td>${esc(ev.sponsor_tech)}</td>
+          <td>${Number(ev.confidence || 0).toFixed(2)}</td>
+          <td>${esc(ev.retry_count)}</td>
+          <td>${esc(ev.output_summary)}</td>
         </tr>
       `).join("");
     }
@@ -629,9 +679,12 @@
         sample_mode: !document.getElementById("cfg-live-mode").checked,
         persist_to_dotenv: true
       };
+      const headers = { "Content-Type": "application/json" };
+      const adminToken = document.getElementById("cfg-admin-token").value.trim();
+      if (adminToken) headers["Authorization"] = `Bearer ${adminToken}`;
       const r = await fetch("/api/credentials", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(payload)
       });
       const d = await r.json();

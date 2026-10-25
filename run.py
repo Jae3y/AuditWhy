@@ -11,18 +11,22 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import os
 from pathlib import Path
 from typing import Any, Dict
+from urllib.parse import urlparse
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from pydantic import ValidationError
 
+from app import __version__
 from app.adapters.live_ingestor import fetch_live_ibm_edgar_facts, fetch_live_sic_v4_codes
 from app.adapters.meterless_provider import MeterlessProviderClient, parse_connect_link
-from app.adapters.zetaris import ZetarisClient
+from app.adapters.zetaris import ZetarisClient, ZetarisSQLValidationError
 from app.config import LOGS_DIR, ROOT_DIR, UI_DIR, mask_secret, settings
 from app.engines.hmem import GLOBAL_HMEM
 from app.engines.scout_intent import ScoutIntentEngine
@@ -30,13 +34,36 @@ from app.llm import LLMRouter
 from app.orchestration.graph import AuditWhyOrchestrator
 from app.schemas import RunRequest, RunResponse
 
+MAX_QUERY_CHARS = 4000
+MAX_SQL_LIMIT = 1000
+_LOOPBACK_PEERS = {"127.0.0.1", "::1", "localhost", "testclient"}
+
 app = FastAPI(
     title="AuditWhy — Autonomous Multi-Agent Discrepancy Investigator",
-    version="1.0.0",
+    version=__version__,
     description="Open Agent Hackathon 2026 — Track 02 (Primary), Track 01 & Track 03",
 )
 
 orchestrator = AuditWhyOrchestrator()
+
+
+def require_admin(request: Request) -> None:
+    """Gate state-changing admin endpoints: loopback peers, or `Authorization: Bearer $AUDITWHY_ADMIN_TOKEN`.
+
+    The server binds 0.0.0.0 for container use, so without this anyone on the network could repoint a provider
+    URL at their own host and receive the configured API key on the next call.
+    """
+    token = settings.admin_token
+    supplied = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if token and supplied and hmac.compare_digest(supplied, token):
+        return
+    peer = request.client.host if request.client else ""
+    if peer in _LOOPBACK_PEERS:
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="Admin endpoint: call from localhost or send 'Authorization: Bearer <AUDITWHY_ADMIN_TOKEN>'.",
+    )
 
 
 @app.get("/health")
@@ -48,6 +75,7 @@ def health_check() -> Dict[str, Any]:
     return {
         "status": "ok",
         "service": "auditwhy",
+        "version": __version__,
         "sample_mode": settings.sample_mode,
         "provider_status": prov["active_provider"],
         "zetaris_status": zetaris_client.check_status(),
@@ -59,14 +87,17 @@ def run_investigation(payload: Dict[str, Any]) -> RunResponse:
     """Execute the 6-agent investigation loop accepting both Judge and Vibe Coding payloads."""
     try:
         req = RunRequest(**payload)
-    except Exception as exc:
+    except (ValidationError, TypeError) as exc:
         raise HTTPException(status_code=422, detail=f"Invalid request payload: {exc}") from exc
 
-    if not req.effective_query():
+    query = req.effective_query()
+    if not query:
         raise HTTPException(
             status_code=400,
             detail="Missing query: provide 'input.query', 'user_query', or 'query'.",
         )
+    if len(query) > MAX_QUERY_CHARS:
+        raise HTTPException(status_code=413, detail=f"Query exceeds {MAX_QUERY_CHARS} characters.")
     return orchestrator.run(req)
 
 
@@ -107,30 +138,61 @@ def credentials_status() -> Dict[str, Any]:
     }
 
 
+def _clean_env_value(raw: Any) -> str:
+    """Single-line value only: a newline in a submitted value must never inject extra .env assignments."""
+    value = str(raw or "").strip()
+    if any(ch in value for ch in "\r\n\0"):
+        raise HTTPException(status_code=400, detail="Credential values must be single-line.")
+    return value
+
+
+def _set_endpoint(url_var: str, key_var: str, new_url: str, new_key: str, notes: list) -> None:
+    """Update a provider endpoint; moving to a different host without a new key drops the old key."""
+    if new_url:
+        old_host = urlparse(os.getenv(url_var, "")).netloc
+        if urlparse(new_url).netloc != old_host and not new_key and os.getenv(key_var):
+            os.environ[key_var] = ""
+            notes.append(f"{key_var} cleared: endpoint host changed and no new key was supplied.")
+        os.environ[url_var] = new_url
+    if new_key:
+        os.environ[key_var] = new_key
+
+
 @app.post("/api/credentials")
-def update_credentials(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Hot-reload credentials in process environment (and optionally persist to .env)."""
+def update_credentials(payload: Dict[str, Any], request: Request) -> Dict[str, Any]:
+    """Hot-reload credentials in process environment (and optionally persist to .env). Admin only."""
+    require_admin(request)
+    notes: list = []
     if "sample_mode" in payload and payload["sample_mode"] is not None:
         os.environ["SAMPLE_MODE"] = "true" if payload["sample_mode"] else "false"
 
     if payload.get("meterless_connect_link"):
-        parsed = parse_connect_link(str(payload["meterless_connect_link"]))
+        try:
+            parsed = parse_connect_link(_clean_env_value(payload["meterless_connect_link"]))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         os.environ["METERLESS_BASE_URL"] = parsed["base_url"]
         os.environ["METERLESS_API_KEY"] = parsed["api_key"]
         os.environ["METERLESS_APP_NAME"] = parsed["app"]
     else:
-        if payload.get("meterless_base_url"):
-            os.environ["METERLESS_BASE_URL"] = str(payload["meterless_base_url"]).strip()
-        if payload.get("meterless_api_key"):
-            os.environ["METERLESS_API_KEY"] = str(payload["meterless_api_key"]).strip()
+        _set_endpoint(
+            "METERLESS_BASE_URL",
+            "METERLESS_API_KEY",
+            _clean_env_value(payload.get("meterless_base_url")),
+            _clean_env_value(payload.get("meterless_api_key")),
+            notes,
+        )
 
     if payload.get("nvidia_api_key"):
-        os.environ["NVIDIA_API_KEY"] = str(payload["nvidia_api_key"]).strip()
+        os.environ["NVIDIA_API_KEY"] = _clean_env_value(payload["nvidia_api_key"])
 
-    if payload.get("zetaris_rest_url"):
-        os.environ["ZETARIS_REST_URL"] = str(payload["zetaris_rest_url"]).strip()
-    if payload.get("zetaris_api_key"):
-        os.environ["ZETARIS_API_KEY"] = str(payload["zetaris_api_key"]).strip()
+    _set_endpoint(
+        "ZETARIS_REST_URL",
+        "ZETARIS_API_KEY",
+        _clean_env_value(payload.get("zetaris_rest_url")),
+        _clean_env_value(payload.get("zetaris_api_key")),
+        notes,
+    )
 
     if payload.get("persist_to_dotenv"):
         env_path = ROOT_DIR / ".env"
@@ -146,16 +208,23 @@ def update_credentials(payload: Dict[str, Any]) -> Dict[str, Any]:
             f"NVIDIA_BASE_URL={settings.nvidia_base_url}",
             f"NVIDIA_API_KEY={settings.nvidia_api_key}",
         ]
+        if os.getenv("SCOUT_HMAC_KEY"):
+            lines.append(f"SCOUT_HMAC_KEY={os.getenv('SCOUT_HMAC_KEY')}")
+        if settings.admin_token:
+            lines.append(f"AUDITWHY_ADMIN_TOKEN={settings.admin_token}")
         env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    return credentials_status()
+    return {**credentials_status(), "notes": notes}
 
 
 @app.post("/api/sql")
 def execute_workbench_sql(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Execute a SQL statement through Scout Intent Guard + Zetaris / Relational SQLite Warehouse."""
+    """Execute a read-only SQL statement through Scout Intent Guard + Zetaris / Relational SQLite Warehouse."""
     sql = str(payload.get("sql", "")).strip()
-    limit = int(payload.get("limit", 100))
+    try:
+        limit = max(1, min(MAX_SQL_LIMIT, int(payload.get("limit", 100))))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="'limit' must be an integer.")
     if not sql:
         raise HTTPException(status_code=400, detail="SQL query cannot be empty.")
 
@@ -172,7 +241,10 @@ def execute_workbench_sql(payload: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     z_client = ZetarisClient(scout_engine=scout)
-    res = z_client.run_sql(sql, limit=limit, contract=eval_res["contract"], tool_name="query_zetaris")
+    try:
+        res = z_client.run_sql(sql, limit=limit, contract=eval_res["contract"], tool_name="query_zetaris", read_only=True)
+    except ZetarisSQLValidationError as exc:
+        return {"status": "REJECTED_READ_ONLY", "sql": sql, "error": str(exc), "rows": [], "row_count": 0}
     return {
         **res,
         "scout_contract_id": eval_res["contract"].contract_id,
@@ -249,6 +321,8 @@ def run_cli(input_path: str, output_path: str) -> RunResponse:
         raise FileNotFoundError(f"Input file not found: {in_file}")
     raw_payload = json.loads(in_file.read_text(encoding="utf-8"))
     req = RunRequest(**raw_payload)
+    if not req.effective_query():
+        raise ValueError(f"{in_file} has no query (expected 'input.query', 'user_query', or 'query').")
     result = orchestrator.run(req)
 
     out_file = Path(output_path)
@@ -271,8 +345,7 @@ def main() -> None:
         run_cli(args.input, args.output)
         return
 
-    port = int(os.getenv("PORT", "8000"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host=os.getenv("HOST", "0.0.0.0"), port=settings.port)
 
 
 if __name__ == "__main__":

@@ -20,8 +20,10 @@ import hashlib
 import hmac
 import json
 import re
+import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,20 +37,59 @@ class ScoutContractError(PermissionError):
 
 
 _INJECTION_PATTERNS = [
-    ("ignore_instructions", re.compile(r"ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions", re.I)),
-    ("system_prompt_override", re.compile(r"(?:system\s+prompt|reveal\s+your\s+instructions|developer\s+message)", re.I)),
+    (
+        "ignore_instructions",
+        re.compile(
+            r"(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|the\s+)?(?:previous|prior|above|earlier|your)\s+"
+            r"(?:instructions|rules|guidelines|prompts?)",
+            re.I,
+        ),
+    ),
+    ("system_prompt_override", re.compile(r"(?:system\s+prompt|reveal\s+your\s+instructions|developer\s+message|you\s+are\s+now\s+(?:in\s+)?(?:dan|developer\s+mode|jailbroken))", re.I)),
     ("destructive_sql", re.compile(r"\b(?:drop\s+table|truncate\s+table|delete\s+from|alter\s+table)\b", re.I)),
     ("secret_exfiltration", re.compile(r"(?:exfiltrate|ZETARIS_API_KEY|METERLESS_API_KEY|NVIDIA_API_KEY|evil\.example\.com|https?://[^\s]*evil)", re.I)),
     ("base64_payload", re.compile(r"(?:base64\s*-d|eval\s*\(\s*atob|[A-Za-z0-9+/]{48,}={0,2})", re.I)),
 ]
 
+_CARD_CANDIDATE = re.compile(r"\b(?:\d[ -]?){12,18}\d\b")
+
+
+def _luhn_valid(digits: str) -> bool:
+    total = 0
+    for idx, ch in enumerate(reversed(digits)):
+        d = int(ch)
+        if idx % 2 == 1:
+            d = d * 2 - 9 if d > 4 else d * 2
+        total += d
+    return total % 10 == 0
+
+
+def _redact_cards(text: str) -> tuple[str, bool]:
+    """Redact 13-19 digit sequences that pass the Luhn check, so CIKs and SIC codes are left intact."""
+    found = False
+
+    def _sub(match: re.Match) -> str:
+        nonlocal found
+        digits = re.sub(r"\D", "", match.group(0))
+        if 13 <= len(digits) <= 19 and _luhn_valid(digits):
+            found = True
+            return "[REDACTED_CREDIT_CARD]"
+        return match.group(0)
+
+    return _CARD_CANDIDATE.sub(_sub, text), found
+
+
 _PII_PATTERNS = [
     ("ssn", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
-    ("credit_card", re.compile(r"\b(?:\d[ -]*?){13,16}\b")),
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")),
 ]
 
 ALLOWED_TOOLS = {"query_zetaris", "verify_dq", "write_memory", "read_memory", "analyze_world_model"}
+
+# Process-wide sliding window: a fresh ScoutIntentEngine is built per run, so a per-instance window
+# would never accumulate more than one request and Layer 5 could never fire.
+_RATE_WINDOW: deque = deque()
+_RATE_LOCK = threading.Lock()
 
 
 @dataclass
@@ -90,13 +131,12 @@ class ScoutIntentEngine:
         self,
         signing_key: Optional[str] = None,
         contracts_log_path: Optional[Path] = None,
-        rate_limit_per_minute: int = 120,
+        rate_limit_per_minute: Optional[int] = None,
     ) -> None:
         self.signing_key = (signing_key or settings.scout_hmac_key).encode("utf-8")
         self.contracts_log_path = contracts_log_path or (LOGS_DIR / "scout_contracts.jsonl")
         self.contracts_log_path.parent.mkdir(parents=True, exist_ok=True)
-        self.rate_limit_per_minute = rate_limit_per_minute
-        self._request_timestamps: List[float] = []
+        self.rate_limit_per_minute = rate_limit_per_minute or settings.scout_rate_limit_per_minute
 
     @staticmethod
     def calculate_intent_score(
@@ -173,12 +213,18 @@ class ScoutIntentEngine:
             if pii_pat.search(sanitized_query):
                 pii_redacted.append(pii_name)
                 sanitized_query = pii_pat.sub(f"[REDACTED_{pii_name.upper()}]", sanitized_query)
+        sanitized_query, had_card = _redact_cards(sanitized_query)
+        if had_card:
+            pii_redacted.append("credit_card")
 
         # Layer 5: Rate Limit Check
         now_flt = time.time()
-        self._request_timestamps = [t for t in self._request_timestamps if now_flt - t < 60.0]
-        self._request_timestamps.append(now_flt)
-        rate_limit_ok = len(self._request_timestamps) <= self.rate_limit_per_minute
+        with _RATE_LOCK:
+            while _RATE_WINDOW and now_flt - _RATE_WINDOW[0] >= 60.0:
+                _RATE_WINDOW.popleft()
+            _RATE_WINDOW.append(now_flt)
+            requests_in_window = len(_RATE_WINDOW)
+        rate_limit_ok = requests_in_window <= self.rate_limit_per_minute
 
         is_blocked = bool(injection_hits) or not rbac_allowed or not scope_allowed or not rate_limit_ok
         risk_penalty = 1.0 if is_blocked else (0.15 if pii_redacted else 0.0)
@@ -203,7 +249,7 @@ class ScoutIntentEngine:
                 "layer4_pii_redaction": {"passed": True, "redacted_types": pii_redacted},
                 "layer5_rate_limit": {
                     "passed": rate_limit_ok,
-                    "requests_in_window": len(self._request_timestamps),
+                    "requests_in_window": requests_in_window,
                 },
             },
         }
