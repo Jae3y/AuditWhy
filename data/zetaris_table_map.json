@@ -1,0 +1,8 @@
+{
+  "_comment": "Canonical table names used by the agents -> names on a live Zetaris instance. Applied only when SAMPLE_MODE=false. The DQ target is the official zetaris/getting-started sic_edgar_usl (company table); the auditwhy.* views are created by scripts/zetaris_onboard.py. Override with ZETARIS_TABLE_MAP (inline JSON or a file path).",
+  "lightning.metastore.usl_demo.sic_edgar_usl": "lightning.metastore.usl_demo.sic_edgar_usl.company",
+  "edgar.company_facts": "auditwhy.edgar_company_facts",
+  "company_dns.sic_codes": "auditwhy.sic_codes",
+  "erp.customer_churn_billing": "auditwhy.customer_churn_billing",
+  "ops.support_tickets_usage": "auditwhy.support_tickets_usage"
+}

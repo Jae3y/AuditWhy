@@ -162,6 +162,8 @@ def _set_endpoint(url_var: str, key_var: str, new_url: str, new_key: str, notes:
 @app.post("/api/credentials")
 def update_credentials(payload: Dict[str, Any], request: Request) -> Dict[str, Any]:
     """Hot-reload credentials in process environment (and optionally persist to .env). Admin only."""
+    if settings.public_demo:
+        raise HTTPException(status_code=403, detail="Credentials are disabled on the public demo; it always runs in sample mode.")
     require_admin(request)
     notes: list = []
     if "sample_mode" in payload and payload["sample_mode"] is not None:

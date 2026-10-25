@@ -191,3 +191,17 @@ class RunResponse(BaseModel):
     trace_events: List[TraceEvent]
     confidence: float
     duration_ms: float
+
+    # Hackathon "Technical Execution Requirements" /run contract (additive; mirrors the fields above)
+    output: Dict[str, Any] = Field(default_factory=dict)  # {summary, recommendations, artifacts}
+    agents: List[Dict[str, str]] = Field(default_factory=list)  # [{name, role}]
+    trace_id: str = ""
+    log_file: str = ""
+    execution_time_seconds: float = 0.0
+    error: Optional[Dict[str, Any]] = None  # {type, message, recoverable} when status == "error"
+
+    # Vibe Coding Starter Guide contract (additive)
+    agents_used: List[str] = Field(default_factory=list)
+    result: Dict[str, Any] = Field(default_factory=dict)  # {summary, findings, confidence}
+    collaboration: Dict[str, Any] = Field(default_factory=dict)
+    log_path: str = ""

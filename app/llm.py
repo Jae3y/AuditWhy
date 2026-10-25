@@ -89,7 +89,7 @@ class LLMRouter:
                         max_tokens=max_tokens,
                     )
                     if res.get("content", "").strip():
-                        self._record_call(task, res["provider"], res["model"], route, live=True)
+                        self._record_call(task, res["provider"], res["model"], route, live=True, served_by=res.get("served_by", ""))
                         return {**res, "is_live": True}
                     errors.append("meterless: empty completion")
                 except Exception as exc:  # noqa: BLE001 - any provider failure falls through to the next tier
@@ -167,6 +167,7 @@ class LLMRouter:
         *,
         live: bool,
         errors: Optional[List[str]] = None,
+        served_by: str = "",
     ) -> None:
         entry: Dict[str, Any] = {
             "task": task,
@@ -177,6 +178,8 @@ class LLMRouter:
             "enable_thinking": route["enable_thinking"],
             "live": live,
         }
+        if served_by:
+            entry["served_by"] = served_by
         if errors:
             entry["fallback_reasons"] = [redact_sensitive_text(e) for e in errors]
         self.call_history.append(entry)

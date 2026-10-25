@@ -24,7 +24,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
       - name: Unit, integrity, security and end-to-end tests
         run: python -m pytest tests/ -q
       - name: Sponsor-stack conformance

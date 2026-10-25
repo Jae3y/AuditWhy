@@ -92,6 +92,12 @@ class PlannerAgent:
                 "sql": "SELECT * FROM erp.customer_churn_billing LIMIT 1000",
             },
             {
+                # Raw filings, so DQ orphans the naive join drops can still be described (ticker, revenue, group).
+                "purpose": "edgar_filings",
+                "hypotheses": ["H2"],
+                "sql": "SELECT * FROM edgar.company_facts LIMIT 1000",
+            },
+            {
                 "purpose": "edgar_sic_join",
                 "hypotheses": ["H2"],
                 # Pass 1 applies only rules H-MEM already holds; with none it is the naive equi-join.

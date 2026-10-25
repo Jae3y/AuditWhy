@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import uuid
 from pathlib import Path
@@ -10,7 +12,7 @@ import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from app.adapters.sample_data import SampleZetarisEngine, get_shared_sample_engine
-from app.config import settings
+from app.config import DATA_DIR, settings
 from app.engines.scout_intent import ExecutionContract, ScoutIntentEngine
 from app.tracing import TraceLogger
 
@@ -55,6 +57,31 @@ def normalize_zetaris_rows(data: Any) -> List[Dict[str, Any]]:
             out.append(row)
         elif isinstance(row, (list, tuple)) and names:
             out.append(dict(zip(names, row)))
+    return out
+
+
+def load_live_table_map() -> Dict[str, str]:
+    """Canonical -> live Zetaris table names: ZETARIS_TABLE_MAP (inline JSON or path) over data/zetaris_table_map.json."""
+    raw = os.getenv("ZETARIS_TABLE_MAP", "").strip()
+    source: Any = None
+    try:
+        if raw.startswith("{"):
+            source = json.loads(raw)
+        elif raw:
+            source = json.loads(Path(raw).expanduser().read_text(encoding="utf-8"))
+        else:
+            source = json.loads((DATA_DIR / "zetaris_table_map.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        source = {}
+    return {k: str(v) for k, v in (source or {}).items() if not k.startswith("_") and isinstance(v, str)}
+
+
+def apply_table_map(sql: str, table_map: Dict[str, str]) -> str:
+    """Rewrite canonical names to live names, longest first, never touching a name that is already more qualified."""
+    out = sql
+    for canonical in sorted(table_map, key=len, reverse=True):
+        pattern = rf"(?<![\w.]){re.escape(canonical)}(?![\w.])"
+        out = re.sub(pattern, table_map[canonical], out, flags=re.IGNORECASE)
     return out
 
 
@@ -125,6 +152,8 @@ class ZetarisClient:
         # Circuit breaker: once live Zetaris is unreachable, the rest of the run goes straight to the mirror
         # instead of paying 3 retries with backoff on every remaining query.
         self.live_unavailable_reason: Optional[str] = None
+        self.table_map = load_live_table_map()
+        self.timeout = settings.zetaris_timeout_seconds
 
     @retry(
         stop=stop_after_attempt(3),
@@ -146,7 +175,7 @@ class ZetarisClient:
             "source": "SqlEditor",
             "limit": int(limit),
         }
-        with httpx.Client(timeout=20.0) as client:
+        with httpx.Client(timeout=self.timeout) as client:
             resp = client.post(endpoint, headers=headers, json=payload)
             if 400 <= resp.status_code < 500 and _CATALOG_MISS.search(resp.text):
                 missing = re.findall(r"\b(?:FROM|JOIN)\s+([A-Za-z_][\w.]*)", cleaned_sql, re.I)
@@ -191,10 +220,12 @@ class ZetarisClient:
             assert_read_only_sql(cleaned_sql)
 
         if not self.sample_mode and self.api_key and self.live_unavailable_reason is None:
+            live_sql = apply_table_map(cleaned_sql, self.table_map)
             try:
-                res = self._post_live_sql(cleaned_sql, limit)
+                res = self._post_live_sql(live_sql, limit)
+                res["canonical_sql"] = cleaned_sql
                 self.executed_queries.append(
-                    {"sql": cleaned_sql, "mode": "live_zetaris", "status": res["status"], "row_count": res["row_count"]}
+                    {"sql": live_sql, "mode": "live_zetaris", "status": res["status"], "row_count": res["row_count"]}
                 )
                 return res
             except (httpx.HTTPError, ValueError) as exc:  # transport, HTTP status, or non-JSON body
@@ -226,9 +257,21 @@ class ZetarisClient:
             return "sample_mode_active"
         if not self.api_key:
             return "unconfigured_fallback_sample"
+        # The documented connectivity check is SELECT 1 over /sql-editor/sqls/run (there is no /health route).
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "X-Org-ID": str(self.org_id),
+            "X-Request-ID": str(uuid.uuid4()),
+            "Content-Type": "application/json",
+        }
+        payload = {"queryId": str(uuid.uuid4()), "sql": "SELECT 1 AS one", "source": "SqlEditor", "limit": 1}
         try:
-            with httpx.Client(timeout=3.0) as client:
-                r = client.get(f"{self.rest_url}/health")
-                return "online" if r.status_code < 500 else "degraded_fallback_sample"
-        except Exception:
+            with httpx.Client(timeout=min(5.0, self.timeout)) as client:
+                r = client.post(f"{self.rest_url}/sql-editor/sqls/run", headers=headers, json=payload)
+        except httpx.HTTPError:
             return "offline_fallback_sample"
+        if r.status_code == 401:
+            return "unauthorized_create_new_api_key"
+        if r.status_code == 400:
+            return "rejected_check_org_id"
+        return "online" if r.status_code < 300 else "degraded_fallback_sample"

@@ -16,7 +16,7 @@ from app.agents.reviewer import FinalReviewerAgent
 from app.agents.scout_guard import ScoutGuardAgent
 from app.agents.writer import ExplanationWriterAgent
 from app.analytics import fmt_usd, mean
-from app.config import redact_sensitive_text
+from app.config import redact_sensitive_text, settings
 from app.engines.hmem import GLOBAL_HMEM, HMemEngine, load_hmem_state
 from app.engines.markovian import MarkovianEngine
 from app.engines.scout_intent import ScoutIntentEngine
@@ -25,6 +25,58 @@ from app.llm import LLMRouter
 from app.orchestration.state import InvestigationState
 from app.schemas import HypothesisItem, RunRequest, RunResponse
 from app.tracing import TraceLogger
+
+
+AGENT_ROLES = [
+    {"name": "ScoutGuardAgent", "role": "5-layer intent guard, H-MEM recall, signs the HMAC ExecutionContract"},
+    {"name": "PlannerAgent", "role": "Decomposes the question into falsifiable hypotheses and a retrieval plan"},
+    {"name": "DataRetrieverAgent", "role": "Runs the plan on Zetaris and grounds rows in the World Model"},
+    {"name": "EvidenceEvaluatorAgent", "role": "Runs its own DQ check; blocks claims without row-level provenance"},
+    {"name": "MarkovianAnalystAgent", "role": "Bounded-chunk analysis; drafts and revises candidate claims"},
+    {"name": "ExplanationWriterAgent", "role": "Writes the executive explanation from verified findings only"},
+    {"name": "FinalReviewerAgent", "role": "Audits caveats and causal language; mines verified rules into H-MEM"},
+]
+
+
+def attach_run_contract(response: RunResponse, trace_logger: TraceLogger, exc: Optional[Exception] = None) -> RunResponse:
+    """Fill the hackathon /run contract fields from the canonical response, so both shapes always agree."""
+    seconds = round(response.duration_ms / 1000.0, 3)
+    participated = list(dict.fromkeys(e.agent_name for e in trace_logger.events))
+    revisions = [e for e in trace_logger.events if e.status == "needs_revision"]
+    response.trace_id = response.run_id
+    response.log_file = f"logs/{trace_logger.run_trace_path.name}"
+    response.log_path = response.log_file
+    response.execution_time_seconds = seconds
+    response.agents = [a for a in AGENT_ROLES if a["name"] in participated] or AGENT_ROLES[:1]
+    response.agents_used = participated
+    response.output = {
+        "summary": response.executive_summary,
+        "recommendations": response.recommended_actions,
+        "artifacts": {
+            "verified_findings": response.verified_findings,
+            "untested_factors": response.untested_factors,
+            "caveat": response.correlation_vs_causation_caveat,
+            "evidence_ledger": response.evidence_ledger,
+        },
+    }
+    response.result = {
+        "summary": response.executive_summary,
+        "findings": response.verified_findings,
+        "confidence": response.confidence,
+    }
+    response.collaboration = {
+        "feedback_loop_completed": response.status in ("success", "partial_success"),
+        "revision_count": len(revisions),
+        "evaluator_findings": [e.output_summary for e in revisions] + response.trace_summary.get("claims_blocked", []),
+    }
+    if exc is not None:
+        response.error = {
+            "type": type(exc).__name__,
+            "message": redact_sensitive_text(str(exc))[:400],
+            # Transport/timeout problems can succeed on retry; logic errors will not.
+            "recoverable": isinstance(exc, (TimeoutError, ConnectionError, OSError)),
+        }
+    return response
 
 
 class AuditWhyOrchestrator:
@@ -48,7 +100,10 @@ class AuditWhyOrchestrator:
     def run(self, request: RunRequest) -> RunResponse:
         start_time = time.perf_counter()
         run_id = request.effective_run_id()
-        eff_sample_mode = self.sample_mode if self.sample_mode is not None else request.effective_sample_mode()
+        if settings.public_demo:
+            eff_sample_mode = True  # a hosted demo has no route to the builder's local Zetaris/Nightshift
+        else:
+            eff_sample_mode = self.sample_mode if self.sample_mode is not None else request.effective_sample_mode()
         trace_logger = TraceLogger(run_id=run_id)
         llm_router = LLMRouter(sample_mode=eff_sample_mode)
         state = InvestigationState(
@@ -61,7 +116,7 @@ class AuditWhyOrchestrator:
             max_retries=request.effective_max_retries(),
         )
         try:
-            return self._execute(state, llm_router, trace_logger, start_time)
+            return attach_run_contract(self._execute(state, llm_router, trace_logger, start_time), trace_logger)
         except Exception as exc:  # noqa: BLE001 - any failure becomes a structured, traced error response
             trace_logger.log(
                 agent_name="Orchestrator",
@@ -74,7 +129,9 @@ class AuditWhyOrchestrator:
                 status="fallback",
                 sponsor_tech="meterless_markovian",
             )
-            return self._build_error_response(state, llm_router, trace_logger, exc, self._elapsed(start_time))
+            return attach_run_contract(
+                self._build_error_response(state, llm_router, trace_logger, exc, self._elapsed(start_time)), trace_logger, exc
+            )
 
     @staticmethod
     def _elapsed(start: float) -> float:

@@ -15,6 +15,35 @@ MIN_CORRELATION = 0.7
 MIN_CORRELATION_SAMPLES = 5
 
 
+def normalize_dq_rows(rows, filings) -> list:
+    """Give DQ invalid records one shape whatever engine produced them.
+
+    The local mirror returns invalid_sic_code/ticker/revenue; a live Zetaris `SHOW DQ ALL INVALID TABLE ...company`
+    returns the USL company columns (cik, entity_name, sic, ...), all as strings. Missing descriptive fields are
+    filled from the raw EDGAR filings retrieved in the same run, matched on zero-padded CIK.
+    """
+    by_cik = {str(f.get("cik", "")).zfill(10): f for f in filings if f.get("cik")}
+    out = []
+    for row in rows:
+        cik = str(row.get("cik", "")).strip()
+        cik = cik.zfill(10) if cik.isdigit() else cik
+        filing = by_cik.get(cik, {})
+        code = str(row.get("invalid_sic_code") or row.get("sic") or row.get("sic_code") or filing.get("sic_code") or "")
+        out.append(
+            {
+                **row,
+                "cik": cik,
+                "invalid_sic_code": code,
+                "ticker": row.get("ticker") or filing.get("ticker") or "",
+                "company_name": row.get("company_name") or row.get("entity_name") or filing.get("company_name") or cik,
+                "industry_group": str(row.get("industry_group") or filing.get("industry_group") or code[:3]),
+                "revenue_2025": row.get("revenue_2025") or filing.get("revenue_2025") or 0,
+                "reported_description": row.get("reported_description") or row.get("sic_description_edgar") or filing.get("sic_reported_description") or "",
+            }
+        )
+    return out
+
+
 class EvidenceEvaluatorAgent:
     """Independently re-checks evidence: runs its own DQ query and blocks claims that lack row-level provenance."""
 
@@ -38,7 +67,7 @@ class EvidenceEvaluatorAgent:
         data, so the plan is sent back for revision.
         """
         dq_res = self.zetaris.run_sql(DQ_SQL, contract=state.execution_contract, tool_name="verify_dq", agent_name=self.name)
-        state.dq_invalid_rows = dq_res["rows"]
+        state.dq_invalid_rows = normalize_dq_rows(dq_res["rows"], state.dataset_rows("edgar_filings"))
         # Zero orphans is a valid, evidence-bearing result for a DQ rule (it proves the join is clean).
         state.datasets["dq_fk_sic_check"] = {**dq_res, "empty_is_evidence": True}
         state.sql_history.append(DQ_SQL)

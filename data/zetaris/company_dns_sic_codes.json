@@ -1,0 +1,110 @@
+{
+ "code": 200,
+ "total": 8,
+ "data": [
+  {
+   "sic_code": "3571",
+   "description": "Electronic Computers",
+   "division": "D",
+   "division_name": "Manufacturing",
+   "major_group": "35",
+   "major_group_name": "Industrial And Commercial Machinery And Computer Equipment",
+   "industry_group": "357",
+   "industry_group_name": "Computer And Office Equipment",
+   "is_leaf_4digit": true,
+   "parent_summary_code": "3570",
+   "taxonomy_source": "company-dns.mediumroast.io/V4.0/sic.json"
+  },
+  {
+   "sic_code": "3572",
+   "description": "Computer Storage Devices",
+   "division": "D",
+   "division_name": "Manufacturing",
+   "major_group": "35",
+   "major_group_name": "Industrial And Commercial Machinery And Computer Equipment",
+   "industry_group": "357",
+   "industry_group_name": "Computer And Office Equipment",
+   "is_leaf_4digit": true,
+   "parent_summary_code": "3570",
+   "taxonomy_source": "company-dns.mediumroast.io/V4.0/sic.json"
+  },
+  {
+   "sic_code": "3575",
+   "description": "Computer Terminals",
+   "division": "D",
+   "division_name": "Manufacturing",
+   "major_group": "35",
+   "major_group_name": "Industrial And Commercial Machinery And Computer Equipment",
+   "industry_group": "357",
+   "industry_group_name": "Computer And Office Equipment",
+   "is_leaf_4digit": true,
+   "parent_summary_code": "3570",
+   "taxonomy_source": "company-dns.mediumroast.io/V4.0/sic.json"
+  },
+  {
+   "sic_code": "3577",
+   "description": "Computer Peripheral Equipment, Not Elsewhere Classified",
+   "division": "D",
+   "division_name": "Manufacturing",
+   "major_group": "35",
+   "major_group_name": "Industrial And Commercial Machinery And Computer Equipment",
+   "industry_group": "357",
+   "industry_group_name": "Computer And Office Equipment",
+   "is_leaf_4digit": true,
+   "parent_summary_code": "3570",
+   "taxonomy_source": "company-dns.mediumroast.io/V4.0/sic.json"
+  },
+  {
+   "sic_code": "3578",
+   "description": "Calculating and Accounting Machines, Except Electronic Computers",
+   "division": "D",
+   "division_name": "Manufacturing",
+   "major_group": "35",
+   "major_group_name": "Industrial And Commercial Machinery And Computer Equipment",
+   "industry_group": "357",
+   "industry_group_name": "Computer And Office Equipment",
+   "is_leaf_4digit": true,
+   "parent_summary_code": "3570",
+   "taxonomy_source": "company-dns.mediumroast.io/V4.0/sic.json"
+  },
+  {
+   "sic_code": "3579",
+   "description": "Office Machines, Not Elsewhere Classified",
+   "division": "D",
+   "division_name": "Manufacturing",
+   "major_group": "35",
+   "major_group_name": "Industrial And Commercial Machinery And Computer Equipment",
+   "industry_group": "357",
+   "industry_group_name": "Computer And Office Equipment",
+   "is_leaf_4digit": true,
+   "parent_summary_code": "3570",
+   "taxonomy_source": "company-dns.mediumroast.io/V4.0/sic.json"
+  },
+  {
+   "sic_code": "7372",
+   "description": "Prepackaged Software",
+   "division": "I",
+   "division_name": "Services",
+   "major_group": "73",
+   "major_group_name": "Business Services",
+   "industry_group": "737",
+   "industry_group_name": "Computer Programming, Data Processing, And Other Computer Related Services",
+   "is_leaf_4digit": true,
+   "parent_summary_code": "7370",
+   "taxonomy_source": "company-dns.mediumroast.io/V4.0/sic.json"
+  },
+  {
+   "sic_code": "4911",
+   "description": "Electric Services",
+   "division": "E",
+   "division_name": "Transportation, Communications, Electric, Gas, And Sanitary Services",
+   "major_group": "49",
+   "major_group_name": "Electric, Gas, And Sanitary Services",
+   "industry_group": "491",
+   "industry_group_name": "Electric Services",
+   "is_leaf_4digit": true,
+   "parent_summary_code": "4910",
+   "taxonomy_source": "company-dns.mediumroast.io/V4.0/sic.json"
+  }
+ ]
+}

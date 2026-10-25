@@ -29,3 +29,13 @@ data/*.db.tmp
 
 # Local editor/agent tooling
 .claude/
+
+# Secrets (hackathon disqualification checklist)
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+credentials.json
+secrets.toml

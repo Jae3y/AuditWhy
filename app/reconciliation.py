@@ -30,7 +30,8 @@ def is_valid_sic_code(code: Any) -> bool:
 
 def leaf_children(summary_code: str, sic_rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """4-digit leaves under `summary_code`, preferring the explicit hierarchy column over prefix matching."""
-    rows = [r for r in sic_rows if r.get("is_leaf_4digit", 1) not in (0, False)]
+    # Live Zetaris REST returns every value as a string, so "false"/"0" must count as False too.
+    rows = [r for r in sic_rows if str(r.get("is_leaf_4digit", 1)).strip().lower() not in ("0", "false")]
     explicit = [r for r in rows if r.get("parent_summary_code") == summary_code]
     if explicit:
         return sorted(explicit, key=lambda r: str(r["sic_code"]))

@@ -128,6 +128,7 @@
         "lightning.metastore.usl_demo.sic_edgar_usl"
       ],
       "sql_queries": [
+        "SELECT * FROM edgar.company_facts LIMIT 1000",
         "SELECT e.cik, e.ticker, e.company_name, e.sic_code AS edgar_sic_code, e.industry_group, e.revenue_2024, e.revenue_2025, s.sic_code AS leaf_sic_code, s.description AS leaf_sic_description FROM edgar.company_facts e LEFT JOIN company_dns.sic_codes s ON e.sic_code = s.sic_code OR (e.sic_code = '3570' AND s.sic_code = '3571') LIMIT 1000"
       ],
       "finding_summary": "IBM (CIK 0000051143) reports SEC SIC 3570, a summary header absent from the 4-digit leaf table; reconciled to 3571 (Electronic Computers), restoring $62.753B FY2025 revenue and $4.12M Q3 ARR"
@@ -584,6 +585,21 @@
     {
       "pass": 1,
       "agent": "DataRetrieverAgent",
+      "purpose": "edgar_filings",
+      "hypotheses": [
+        "H2"
+      ],
+      "tables": [
+        "edgar.company_facts"
+      ],
+      "sql": "SELECT * FROM edgar.company_facts LIMIT 1000",
+      "status": "SUCCESS",
+      "row_count": 10,
+      "engine": "SQLiteRelationalWarehouse"
+    },
+    {
+      "pass": 1,
+      "agent": "DataRetrieverAgent",
       "purpose": "edgar_sic_join",
       "hypotheses": [
         "H2"
@@ -665,10 +681,11 @@
     ],
     "retriever_passes_executed": 1,
     "dq_revision_triggered": false,
-    "queries_executed_count": 7,
+    "queries_executed_count": 8,
     "sql_queries": [
       "SELECT industry_segment, COUNT(*) AS accounts_count, SUM(q3_arr_usd) AS q3_arr_total_usd, AVG(q3_net_retention_pct) AS avg_q3_net_retention_pct FROM erp.customer_churn_billing GROUP BY industry_segment",
       "SELECT * FROM erp.customer_churn_billing LIMIT 1000",
+      "SELECT * FROM edgar.company_facts LIMIT 1000",
       "SELECT e.cik, e.ticker, e.company_name, e.sic_code AS edgar_sic_code, e.industry_group, e.revenue_2024, e.revenue_2025, s.sic_code AS leaf_sic_code, s.description AS leaf_sic_description FROM edgar.company_facts e LEFT JOIN company_dns.sic_codes s ON e.sic_code = s.sic_code OR (e.sic_code = '3570' AND s.sic_code = '3571') LIMIT 1000",
       "SELECT s.*, b.industry_segment, b.sic_code_edgar, b.q2_arr_usd, b.q3_arr_usd, b.q3_net_retention_pct, b.q3_arr_delta_usd, b.sla_credits_issued_usd, b.weather_sla_exposure_usd, b.primary_datacenter_region, b.churn_risk_tier FROM ops.support_tickets_usage s JOIN erp.customer_churn_billing b ON s.cik = b.cik LIMIT 1000",
       "SELECT * FROM erp.pricing_tier_changes WHERE effective_quarter = '2026-Q3' LIMIT 50",
@@ -977,8 +994,8 @@
             "content": "Reconciliation Rule [SIC-3570-LEAF]: SEC EDGAR CIK 0000051143 (IBM) reports summary SIC code 3570. Map 3570 -> Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers) to prevent dropping $62.753B FY2025 revenue in Zetaris USL joins.",
             "type": "procedural",
             "layer": "long_term",
-            "timestamp": "2026-10-25T07:13:37.867689Z",
-            "lastAccessed": "2026-10-25T07:13:41.169605Z",
+            "timestamp": "2026-10-25T07:40:23.559637Z",
+            "lastAccessed": "2026-10-25T07:40:27.134794Z",
             "accessCount": 1,
             "tags": [
               "zetaris",
@@ -1012,7 +1029,7 @@
             "source": "zetaris_usl_dq:fk_sic_check",
             "provenance": {
               "origin": "zetaris_usl_dq:fk_sic_check",
-              "learnedAt": "2026-10-25T07:13:37.867689Z",
+              "learnedAt": "2026-10-25T07:40:23.559637Z",
               "label": "procedural:taxonomy",
               "rule": {
                 "rule_type": "sic_summary_to_leaf",
@@ -1074,8 +1091,8 @@
         "content": "Reconciliation Rule [SIC-3570-LEAF]: SEC EDGAR CIK 0000051143 (IBM) reports summary SIC code 3570. Map 3570 -> Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers) to prevent dropping $62.753B FY2025 revenue in Zetaris USL joins.",
         "type": "procedural",
         "layer": "long_term",
-        "timestamp": "2026-10-25T07:13:37.867689Z",
-        "lastAccessed": "2026-10-25T07:13:41.226177Z",
+        "timestamp": "2026-10-25T07:40:23.559637Z",
+        "lastAccessed": "2026-10-25T07:40:27.221172Z",
         "accessCount": 1,
         "tags": [
           "zetaris",
@@ -1109,7 +1126,7 @@
         "source": "zetaris_usl_dq:fk_sic_check",
         "provenance": {
           "origin": "zetaris_usl_dq:fk_sic_check",
-          "learnedAt": "2026-10-25T07:13:41.225177Z",
+          "learnedAt": "2026-10-25T07:40:27.221172Z",
           "label": "procedural:taxonomy",
           "rule": {
             "rule_type": "sic_summary_to_leaf",
@@ -1157,8 +1174,8 @@
           "content": "Reconciliation Rule [SIC-3570-LEAF]: SEC EDGAR CIK 0000051143 (IBM) reports summary SIC code 3570. Map 3570 -> Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers) to prevent dropping $62.753B FY2025 revenue in Zetaris USL joins.",
           "type": "procedural",
           "layer": "long_term",
-          "timestamp": "2026-10-25T07:13:37.867689Z",
-          "lastAccessed": "2026-10-25T07:13:41.226177Z",
+          "timestamp": "2026-10-25T07:40:23.559637Z",
+          "lastAccessed": "2026-10-25T07:40:27.221172Z",
           "accessCount": 1,
           "tags": [
             "zetaris",
@@ -1192,7 +1209,7 @@
           "source": "zetaris_usl_dq:fk_sic_check",
           "provenance": {
             "origin": "zetaris_usl_dq:fk_sic_check",
-            "learnedAt": "2026-10-25T07:13:41.225177Z",
+            "learnedAt": "2026-10-25T07:40:27.221172Z",
             "label": "procedural:taxonomy",
             "rule": {
               "rule_type": "sic_summary_to_leaf",
@@ -1316,7 +1333,7 @@
       "score": 0.938,
       "intent": "warm_sla_and_taxonomy_reevaluation",
       "contract": {
-        "contract_id": "sct-74559729d6d0",
+        "contract_id": "sct-fa579330c0a0",
         "run_id": "example-2-warm-compounding",
         "intent": "warm_sla_and_taxonomy_reevaluation",
         "allowed_tools": [
@@ -1354,10 +1371,10 @@
           }
         },
         "score": 0.938,
-        "issued_at": 1792912421,
-        "expires_at": 1792912721,
+        "issued_at": 1792914027,
+        "expires_at": 1792914327,
         "signedBy": "scout",
-        "signature": "f9eb86c920842ca82f451cfbe5e509aef609ce8434fceadb279e6c0f55c769ba"
+        "signature": "8521cdf7f19aed9067fca8e096d6327e223e73610a403cc6a52a704815089561"
       }
     }
   },
@@ -1452,13 +1469,13 @@
   },
   "trace_events": [
     {
-      "timestamp": "2026-10-25T07:13:41.165920Z",
+      "timestamp": "2026-10-25T07:40:27.130767Z",
       "run_id": "example-2-warm-compounding",
-      "trace_id": "trc-247f02bfd661",
+      "trace_id": "trc-fd6e76038f8a",
       "agent_name": "ScoutGuardAgent",
       "action": "issue_signed_execution_contract",
       "input_summary": "Query passed 5-layer guard (score=0.938): Re-evaluate our Computer & Office Equipment enterprise exposure and SLA risk for Q4, incorporating our resolved SIC taxo",
-      "output_summary": "Issued HMAC-SHA256 ExecutionContract id=sct-74559729d6d0 signedBy=scout TTL=300s tools=['query_zetaris', 'verify_dq', 'write_memory', 'read_memory', 'analyze_world_model']",
+      "output_summary": "Issued HMAC-SHA256 ExecutionContract id=sct-fa579330c0a0 signedBy=scout TTL=300s tools=['query_zetaris', 'verify_dq', 'write_memory', 'read_memory', 'analyze_world_model']",
       "target_agent": "PlannerAgent",
       "confidence": 0.938,
       "retry_count": 0,
@@ -1466,9 +1483,9 @@
       "sponsor_tech": "meterless_scout"
     },
     {
-      "timestamp": "2026-10-25T07:13:41.169605Z",
+      "timestamp": "2026-10-25T07:40:27.136779Z",
       "run_id": "example-2-warm-compounding",
-      "trace_id": "trc-5c15e201af20",
+      "trace_id": "trc-ccb6027391cd",
       "agent_name": "ScoutGuardAgent",
       "action": "retrieve_hmem_context",
       "input_summary": "8-factor H-MEM recall for 'Re-evaluate our Computer & Office Equipment enterprise exposure and SLA risk for Q4, incor' (memory_mode=warm, fixture_seeded=False)",
@@ -1480,13 +1497,13 @@
       "sponsor_tech": "meterless_hmem"
     },
     {
-      "timestamp": "2026-10-25T07:13:41.172809Z",
+      "timestamp": "2026-10-25T07:40:27.139782Z",
       "run_id": "example-2-warm-compounding",
-      "trace_id": "trc-a4c87a7d8f30",
+      "trace_id": "trc-e4527b4e4c34",
       "agent_name": "PlannerAgent",
       "action": "decompose_hypotheses",
       "input_summary": "Decomposing query into 4 hypotheses (memory_mode=warm, warm=True)",
-      "output_summary": "Decomposed 'Re-evaluate our Computer & Office Equipment enterprise exposure and SLA risk for Q4, incorporating our resolved SIC taxo' into 4 falsifiable hypotheses (H1, H2, H3, H4) and a 6-query retrieval plan; 1 H-MEM reconciliation rule(s) applied to Pass 1. | World Model entities: 1.",
+      "output_summary": "Decomposed 'Re-evaluate our Computer & Office Equipment enterprise exposure and SLA risk for Q4, incorporating our resolved SIC taxo' into 4 falsifiable hypotheses (H1, H2, H3, H4) and a 7-query retrieval plan; 1 H-MEM reconciliation rule(s) applied to Pass 1. | World Model entities: 1.",
       "target_agent": "DataRetrieverAgent",
       "confidence": 0.9,
       "retry_count": 0,
@@ -1494,12 +1511,12 @@
       "sponsor_tech": "nvidia_nemotron"
     },
     {
-      "timestamp": "2026-10-25T07:13:41.176981Z",
+      "timestamp": "2026-10-25T07:40:27.150583Z",
       "run_id": "example-2-warm-compounding",
-      "trace_id": "trc-a2b456b6ee83",
+      "trace_id": "trc-6085cc9c840f",
       "agent_name": "DataRetrieverAgent",
       "action": "query_zetaris_pass_1",
-      "input_summary": "Executed 6 planned Zetaris queries (H-MEM rules applied to EDGAR x SIC join: ['3570'])",
+      "input_summary": "Executed 7 planned Zetaris queries (H-MEM rules applied to EDGAR x SIC join: ['3570'])",
       "output_summary": "EDGAR x SIC join returned 10 filings; 10 billing cohorts; 10 support telemetry rows; empty or missing evidence: pricing_tier_changes, competitor_loss_reasons.",
       "target_agent": "EvidenceEvaluatorAgent",
       "confidence": 0.92,
@@ -1508,9 +1525,9 @@
       "sponsor_tech": "zetaris"
     },
     {
-      "timestamp": "2026-10-25T07:13:41.203194Z",
+      "timestamp": "2026-10-25T07:40:27.186845Z",
       "run_id": "example-2-warm-compounding",
-      "trace_id": "trc-a2f761976289",
+      "trace_id": "trc-953b6463ec1d",
       "agent_name": "DataRetrieverAgent",
       "action": "ingest_world_model_pass_1",
       "input_summary": "Grounded EDGAR, billing and support rows as enterprise_account observations (6-stage pipeline)",
@@ -1522,9 +1539,9 @@
       "sponsor_tech": "meterless_world_model"
     },
     {
-      "timestamp": "2026-10-25T07:13:41.205210Z",
+      "timestamp": "2026-10-25T07:40:27.189363Z",
       "run_id": "example-2-warm-compounding",
-      "trace_id": "trc-6d32f21931b3",
+      "trace_id": "trc-2207e51df7f5",
       "agent_name": "EvidenceEvaluatorAgent",
       "action": "verify_warm_dq_reconciliation",
       "input_summary": "Ran `SHOW DQ ALL INVALID TABLE lightning.metastore.usl_demo.sic_edgar_usl` against 10 joined filings (retriever pass 1)",
@@ -1536,9 +1553,9 @@
       "sponsor_tech": "zetaris"
     },
     {
-      "timestamp": "2026-10-25T07:13:41.213210Z",
+      "timestamp": "2026-10-25T07:40:27.205802Z",
       "run_id": "example-2-warm-compounding",
-      "trace_id": "trc-5eaa339cc473",
+      "trace_id": "trc-8d9e7de4058c",
       "agent_name": "MarkovianAnalystAgent",
       "action": "run_markovian_bounded_analysis",
       "input_summary": "Ran 3 bounded chunk(s) [cohort_scan, operational_correlation, candidate_synthesis] over 10 World Model accounts (focus: Computer & Office Equipment; memory seam=True)",
@@ -1550,12 +1567,12 @@
       "sponsor_tech": "meterless_markovian"
     },
     {
-      "timestamp": "2026-10-25T07:13:41.215210Z",
+      "timestamp": "2026-10-25T07:40:27.206968Z",
       "run_id": "example-2-warm-compounding",
-      "trace_id": "trc-9fe1794722ed",
+      "trace_id": "trc-0690718f02a1",
       "agent_name": "EvidenceEvaluatorAgent",
       "action": "flag_unsupported_claim",
-      "input_summary": "Audited 6 MarkovianAnalystAgent claims against the evidence ledger (7 Zetaris queries)",
+      "input_summary": "Audited 6 MarkovianAnalystAgent claims against the evidence ledger (8 Zetaris queries)",
       "output_summary": "Audited 6 candidate claim(s): 4 supported, 0 inconclusive, 2 blocked (C_H4; C_UF_COMPETITOR_DISPLACEMENT). Blocked claims must move to untested_factors.",
       "target_agent": "MarkovianAnalystAgent",
       "confidence": 0.98,
@@ -1564,9 +1581,9 @@
       "sponsor_tech": "nvidia_nemotron"
     },
     {
-      "timestamp": "2026-10-25T07:13:41.217210Z",
+      "timestamp": "2026-10-25T07:40:27.210427Z",
       "run_id": "example-2-warm-compounding",
-      "trace_id": "trc-f67085e38901",
+      "trace_id": "trc-c5e7bc531c50",
       "agent_name": "MarkovianAnalystAgent",
       "action": "strip_unverified_claim_and_finalize_findings",
       "input_summary": "Applied EvidenceEvaluatorAgent verdicts to 6 candidate claims",
@@ -1578,12 +1595,12 @@
       "sponsor_tech": "meterless_markovian"
     },
     {
-      "timestamp": "2026-10-25T07:13:41.218646Z",
+      "timestamp": "2026-10-25T07:40:27.211652Z",
       "run_id": "example-2-warm-compounding",
-      "trace_id": "trc-a663a7db87b1",
+      "trace_id": "trc-abbb29c41a5f",
       "agent_name": "ExplanationWriterAgent",
       "action": "draft_executive_explanation",
-      "input_summary": "Synthesizing narrative from 3 verified finding(s), 2 untested factor(s) and 7 lineage entries",
+      "input_summary": "Synthesizing narrative from 3 verified finding(s), 2 untested factor(s) and 8 lineage entries",
       "output_summary": "Drafted executive summary (1126 chars) and 5 data-derived actions; caveat section deferred to FinalReviewerAgent audit.",
       "target_agent": "FinalReviewerAgent",
       "confidence": 0.9,
@@ -1592,9 +1609,9 @@
       "sponsor_tech": "nvidia_nemotron"
     },
     {
-      "timestamp": "2026-10-25T07:13:41.222175Z",
+      "timestamp": "2026-10-25T07:40:27.214241Z",
       "run_id": "example-2-warm-compounding",
-      "trace_id": "trc-38a71c717a31",
+      "trace_id": "trc-75fd0f9ccdc8",
       "agent_name": "FinalReviewerAgent",
       "action": "enforce_epistemological_caveat",
       "input_summary": "Audited draft for causal discipline, caveat coverage and finding provenance",
@@ -1606,9 +1623,9 @@
       "sponsor_tech": "nvidia_nemotron"
     },
     {
-      "timestamp": "2026-10-25T07:13:41.223177Z",
+      "timestamp": "2026-10-25T07:40:27.216312Z",
       "run_id": "example-2-warm-compounding",
-      "trace_id": "trc-36fe8a6b0809",
+      "trace_id": "trc-21a6b349b937",
       "agent_name": "ExplanationWriterAgent",
       "action": "revise_explanation_with_caveat",
       "input_summary": "Addressing 1 FinalReviewerAgent issue(s): missing_caveat_coverage",
@@ -1620,9 +1637,9 @@
       "sponsor_tech": "nvidia_nemotron"
     },
     {
-      "timestamp": "2026-10-25T07:13:41.224177Z",
+      "timestamp": "2026-10-25T07:40:27.218813Z",
       "run_id": "example-2-warm-compounding",
-      "trace_id": "trc-4174ea52356f",
+      "trace_id": "trc-2a9d35db557e",
       "agent_name": "FinalReviewerAgent",
       "action": "approve_final_explanation",
       "input_summary": "Re-audited revised draft against all three gates",
@@ -1634,9 +1651,9 @@
       "sponsor_tech": "nvidia_nemotron"
     },
     {
-      "timestamp": "2026-10-25T07:13:41.234174Z",
+      "timestamp": "2026-10-25T07:40:27.241185Z",
       "run_id": "example-2-warm-compounding",
-      "trace_id": "trc-6a60c4cd92ab",
+      "trace_id": "trc-beb25b8549e6",
       "agent_name": "FinalReviewerAgent",
       "action": "mine_rule_into_hmem_and_sleep_preview",
       "input_summary": "Mining 1 reconciliation(s) into H-MEM long_term and running SleepCycleService.preview()",
@@ -1649,5 +1666,457 @@
     }
   ],
   "confidence": 0.883,
-  "duration_ms": 96.5
+  "duration_ms": 133.96,
+  "output": {
+    "summary": "Investigation for \"Re-evaluate our Computer & Office Equipment enterprise exposure and SLA risk for Q4, incorporating our resolved SIC taxonomy rules and regio\" (focus: Computer & Office Equipment). Q3 net revenue retention in the focus cohort contracted: 86.99% across 7 accounts (-$2.47M ARR, 310 contract events) vs 101.67% across 3 comparison accounts. (1) Forward risk: Computer & Office Equipment carries $2.08M in Q4 weather SLA penalty exposure, led by IBM $620K in us-east-ny, CSCO $390K in us-east-nc, WDC $280K in us-west-ca. (2) Operational driver (correlational): P1 escalations 13->88, p99 latency up to 2,140ms, timeout rate r=0.962 with retention loss, $530K SLA credits. (3) Taxonomic data blindspot: INTERNATIONAL BUSINESS MACHINES CORP (CIK 0000051143) files under summary SIC 3570, which a naive EDGAR x SIC join drops ($62.753B FY2025 revenue); the H-MEM reconciliation rule recalled at chunk 0 kept it in the Pass 1 join, reconciled to leaf 3571. Blocked as untested (no supporting rows in Zetaris): H4 Enterprise Pricing-Tier & Rate-Card Change Impact; H_EXT Competitor Contract Displacement / Bundling.",
+    "recommendations": [
+      {
+        "priority": "P0_IMMEDIATE",
+        "target_system": "Zetaris Unified Semantic Layer (sic_edgar_usl)",
+        "action": "Deploy a hierarchy-aware USL join rule mapping summary SIC 3570 to leaf 3571 so INTERNATIONAL BUSINESS MACHINES CORP is never dropped from cohort reporting.",
+        "quantified_impact": "Restores $62.753B FY2025 SEC revenue and $4.12M Q3 ARR visibility."
+      },
+      {
+        "priority": "P0_IMMEDIATE",
+        "target_system": "API Gateway & Batch Connector Runtime",
+        "action": "Remediate `v4.2_batch_connector_gateway_timeout`, `storage_telemetry_stream_backpressure`, `terminal_heartbeat_webhook_drop` for the highest-latency accounts (IBM, WDC, DBD, HPQ, CSCO) and bring p99 latency back to the Q2 median of 320ms (Q3 peak 2,140ms).",
+        "quantified_impact": "Targets the -$2.47M Q3 ARR contraction trend and $530K/quarter in SLA credit payouts."
+      },
+      {
+        "priority": "P1_PRE_Q4_FREEZE",
+        "target_system": "Multi-Region Datacenter Failover (us-west-ca, us-east-ny, us-east-nc)",
+        "action": "Pre-stage active-active regional failover ahead of Q4 weather advisories for IBM (us-east-ny), CSCO (us-east-nc), WDC (us-west-ca).",
+        "quantified_impact": "Protects $2.08M in Q4 weather SLA exposure (us-west-ca $685K, us-east-ny $620K, us-east-nc $540K)."
+      },
+      {
+        "priority": "P2_EVIDENCE_GAP",
+        "target_system": "Zetaris Data Catalog",
+        "action": "Mount erp.pricing_tier_changes with 2026-Q3 rows joined on account CIK / billing_cohort_id so H4 (Enterprise Pricing-Tier & Rate-Card Change Impact) can be tested.",
+        "quantified_impact": "Converts an untested factor into a falsifiable hypothesis on the next run."
+      },
+      {
+        "priority": "P2_EVIDENCE_GAP",
+        "target_system": "Zetaris Data Catalog",
+        "action": "Mount crm.opportunity_loss_reasons joined on account CIK (win/loss notes) so H_EXT (Competitor Contract Displacement / Bundling) can be tested.",
+        "quantified_impact": "Converts an untested factor into a falsifiable hypothesis on the next run."
+      }
+    ],
+    "artifacts": {
+      "verified_findings": [
+        {
+          "finding_id": "F1_OPERATIONAL_LATENCY_DRIVER",
+          "title": "Operational degradation co-moves with retention loss (top cause: v4.2_batch_connector_gateway_timeout)",
+          "confidence": 0.84,
+          "evidence_type": "correlational",
+          "evidence_tables": [
+            "ops.support_tickets_usage",
+            "erp.customer_churn_billing"
+          ],
+          "metrics": {
+            "cohort_q2_p1_tickets": 13,
+            "cohort_q3_p1_tickets": 88,
+            "p1_escalation_multiplier": "6.77x",
+            "peak_p99_latency_ms": 2140,
+            "peak_p99_account": "INTERNATIONAL BUSINESS MACHINES CORP",
+            "correlation_with_retention_drop_r": 0.962,
+            "correlation_ci95": {
+              "low": 0.843,
+              "high": 0.991
+            },
+            "multivariate_correlations": {
+              "timeout_rate_vs_retention_loss_r": 0.962,
+              "p99_latency_vs_retention_loss_r": 0.973,
+              "p1_escalations_vs_retention_loss_r": 0.944,
+              "mttr_hours_vs_retention_loss_r": 0.969,
+              "timeout_vs_retention_loss_r": 0.962,
+              "latency_vs_retention_loss_r": 0.973
+            },
+            "root_causes_by_q3_p1_tickets": {
+              "v4.2_batch_connector_gateway_timeout": 51,
+              "storage_telemetry_stream_backpressure": 22,
+              "terminal_heartbeat_webhook_drop": 15
+            },
+            "sla_credits_issued_usd": 530000
+          },
+          "explanation": "In Computer & Office Equipment, Q3 P1 escalations went 13->88, led by v4.2_batch_connector_gateway_timeout, storage_telemetry_stream_backpressure, terminal_heartbeat_webhook_drop; p99 latency peaked at 2,140ms (INTERNATIONAL BUSINESS MACHINES CORP). Across all 10 accounts, timeout rate correlates with retention loss at r=0.962. $530K in SLA credits were issued; cohort NRR 86.99% (-$2.47M ARR)."
+        },
+        {
+          "finding_id": "F2_TAXONOMIC_BLINDSPOT_IBM_3570",
+          "title": "SEC EDGAR SIC 3570 vs. US SIC V4 leaf orphan ($62.753B revenue blindspot)",
+          "confidence": 0.99,
+          "evidence_type": "structural",
+          "evidence_tables": [
+            "lightning.datasource.rest.sec_edgar",
+            "lightning.datasource.rest.company_dns",
+            "lightning.metastore.usl_demo.sic_edgar_usl"
+          ],
+          "metrics": {
+            "orphan_cik": "0000051143",
+            "orphan_company": "INTERNATIONAL BUSINESS MACHINES CORP",
+            "edgar_reported_sic": "3570",
+            "reconciled_leaf_sic": "3571",
+            "resolution_source": "hmem",
+            "leaf_policy": "primary_leaf",
+            "leaf_candidates": [
+              "3571",
+              "3572",
+              "3575",
+              "3577",
+              "3578",
+              "3579"
+            ],
+            "restored_fy2025_revenue_usd": 62753000000,
+            "restored_q3_arr_usd": 4120000,
+            "q3_arr_delta_usd": -730000
+          },
+          "explanation": "Zetaris DQ rule fk_sic_check shows INTERNATIONAL BUSINESS MACHINES CORP (CIK 0000051143) files under SEC SIC 3570, which is not a 4-digit leaf in company_dns.sic_codes. A naive inner join silently drops its $62.753B FY2025 revenue and -$730K Q3 ARR movement. Reconciled under Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers). Leaf chosen by the primary_leaf policy among 3571, 3572, 3575, 3577, 3578, 3579; industry-group totals are the same whichever leaf is chosen."
+        },
+        {
+          "finding_id": "F3_Q4_REGIONAL_WEATHER_SLA_EXPOSURE",
+          "title": "Q4 regional weather SLA exposure ($2.08M in Computer & Office Equipment)",
+          "confidence": 0.97,
+          "evidence_type": "direct",
+          "evidence_tables": [
+            "erp.customer_churn_billing"
+          ],
+          "metrics": {
+            "cohort_weather_sla_exposure_usd": 2085000,
+            "top_accounts": [
+              {
+                "ticker": "IBM",
+                "account_name": "INTERNATIONAL BUSINESS MACHINES CORP",
+                "region": "us-east-ny",
+                "exposure_usd": 620000
+              },
+              {
+                "ticker": "CSCO",
+                "account_name": "CISCO SYSTEMS INC",
+                "region": "us-east-nc",
+                "exposure_usd": 390000
+              },
+              {
+                "ticker": "WDC",
+                "account_name": "WESTERN DIGITAL CORP",
+                "region": "us-west-ca",
+                "exposure_usd": 280000
+              }
+            ],
+            "by_region": {
+              "us-west-ca": 685000,
+              "us-east-ny": 620000,
+              "us-east-nc": 540000,
+              "us-midwest-oh": 240000
+            }
+          },
+          "explanation": "Computer & Office Equipment carries $2.08M in Q4 weather SLA penalty exposure, led by IBM $620K in us-east-ny, CSCO $390K in us-east-nc, WDC $280K in us-west-ca."
+        }
+      ],
+      "untested_factors": [
+        {
+          "factor_id": "UF_H4",
+          "hypothesis_id": "H4",
+          "title": "Enterprise Pricing-Tier & Rate-Card Change Impact",
+          "reason_untested": "Blocked by EvidenceEvaluatorAgent: `SELECT * FROM erp.pricing_tier_changes WHERE effective_quarter = '2026-Q3' LIMIT 50` -> No row-level provenance (pricing_tier_changes: TABLE_NOT_FOUND, 0 rows).",
+          "required_data_to_test": "erp.pricing_tier_changes with 2026-Q3 rows joined on account CIK / billing_cohort_id"
+        },
+        {
+          "factor_id": "UF_COMPETITOR_DISPLACEMENT",
+          "hypothesis_id": "H_EXT",
+          "title": "Competitor Contract Displacement / Bundling",
+          "reason_untested": "Blocked by EvidenceEvaluatorAgent: `SELECT * FROM crm.opportunity_loss_reasons WHERE fiscal_quarter = '2026-Q3' LIMIT 50` -> No row-level provenance (competitor_loss_reasons: TABLE_NOT_FOUND, 0 rows).",
+          "required_data_to_test": "crm.opportunity_loss_reasons joined on account CIK (win/loss notes)."
+        }
+      ],
+      "caveat": "CORRELATION VS. CAUSATION & UNTESTED FACTORS CAVEAT: The association between operational degradation and retention loss (r = 0.962, 95% CI 0.843..0.991) is observational; telemetry alone cannot rule out confounders. The following remain UNTESTED FACTORS because no supporting rows exist in the mounted Zetaris catalog: H4 Enterprise Pricing-Tier & Rate-Card Change Impact (needs erp.pricing_tier_changes with 2026-Q3 rows joined on account CIK / billing_cohort_id); H_EXT Competitor Contract Displacement / Bundling (needs crm.opportunity_loss_reasons joined on account CIK (win/loss notes)).",
+      "evidence_ledger": [
+        {
+          "pass": 1,
+          "agent": "DataRetrieverAgent",
+          "purpose": "segment_summary",
+          "hypotheses": [
+            "H1"
+          ],
+          "tables": [
+            "erp.customer_churn_billing"
+          ],
+          "sql": "SELECT industry_segment, COUNT(*) AS accounts_count, SUM(q3_arr_usd) AS q3_arr_total_usd, AVG(q3_net_retention_pct) AS avg_q3_net_retention_pct FROM erp.customer_churn_billing GROUP BY industry_segment",
+          "status": "SUCCESS",
+          "row_count": 3,
+          "engine": "SQLiteRelationalWarehouse"
+        },
+        {
+          "pass": 1,
+          "agent": "DataRetrieverAgent",
+          "purpose": "billing_cohorts",
+          "hypotheses": [
+            "H1",
+            "H3"
+          ],
+          "tables": [
+            "erp.customer_churn_billing"
+          ],
+          "sql": "SELECT * FROM erp.customer_churn_billing LIMIT 1000",
+          "status": "SUCCESS",
+          "row_count": 10,
+          "engine": "SQLiteRelationalWarehouse"
+        },
+        {
+          "pass": 1,
+          "agent": "DataRetrieverAgent",
+          "purpose": "edgar_filings",
+          "hypotheses": [
+            "H2"
+          ],
+          "tables": [
+            "edgar.company_facts"
+          ],
+          "sql": "SELECT * FROM edgar.company_facts LIMIT 1000",
+          "status": "SUCCESS",
+          "row_count": 10,
+          "engine": "SQLiteRelationalWarehouse"
+        },
+        {
+          "pass": 1,
+          "agent": "DataRetrieverAgent",
+          "purpose": "edgar_sic_join",
+          "hypotheses": [
+            "H2"
+          ],
+          "tables": [
+            "edgar.company_facts",
+            "company_dns.sic_codes"
+          ],
+          "sql": "SELECT e.cik, e.ticker, e.company_name, e.sic_code AS edgar_sic_code, e.industry_group, e.revenue_2024, e.revenue_2025, s.sic_code AS leaf_sic_code, s.description AS leaf_sic_description FROM edgar.company_facts e LEFT JOIN company_dns.sic_codes s ON e.sic_code = s.sic_code OR (e.sic_code = '3570' AND s.sic_code = '3571') LIMIT 1000",
+          "status": "SUCCESS",
+          "row_count": 10,
+          "engine": "SQLiteRelationalWarehouse"
+        },
+        {
+          "pass": 1,
+          "agent": "DataRetrieverAgent",
+          "purpose": "support_telemetry",
+          "hypotheses": [
+            "H3"
+          ],
+          "tables": [
+            "ops.support_tickets_usage",
+            "erp.customer_churn_billing"
+          ],
+          "sql": "SELECT s.*, b.industry_segment, b.sic_code_edgar, b.q2_arr_usd, b.q3_arr_usd, b.q3_net_retention_pct, b.q3_arr_delta_usd, b.sla_credits_issued_usd, b.weather_sla_exposure_usd, b.primary_datacenter_region, b.churn_risk_tier FROM ops.support_tickets_usage s JOIN erp.customer_churn_billing b ON s.cik = b.cik LIMIT 1000",
+          "status": "SUCCESS",
+          "row_count": 10,
+          "engine": "SQLiteRelationalWarehouse"
+        },
+        {
+          "pass": 1,
+          "agent": "DataRetrieverAgent",
+          "purpose": "pricing_tier_changes",
+          "hypotheses": [
+            "H4"
+          ],
+          "tables": [
+            "erp.pricing_tier_changes"
+          ],
+          "sql": "SELECT * FROM erp.pricing_tier_changes WHERE effective_quarter = '2026-Q3' LIMIT 50",
+          "status": "TABLE_NOT_FOUND",
+          "row_count": 0,
+          "engine": "SQLiteRelationalWarehouse"
+        },
+        {
+          "pass": 1,
+          "agent": "DataRetrieverAgent",
+          "purpose": "competitor_loss_reasons",
+          "hypotheses": [],
+          "tables": [
+            "crm.opportunity_loss_reasons"
+          ],
+          "sql": "SELECT * FROM crm.opportunity_loss_reasons WHERE fiscal_quarter = '2026-Q3' LIMIT 50",
+          "status": "TABLE_NOT_FOUND",
+          "row_count": 0,
+          "engine": "SQLiteRelationalWarehouse"
+        },
+        {
+          "pass": 1,
+          "agent": "EvidenceEvaluatorAgent",
+          "purpose": "dq_fk_sic_check",
+          "hypotheses": [
+            "H2"
+          ],
+          "tables": [
+            "lightning.metastore.usl_demo.sic_edgar_usl"
+          ],
+          "sql": "SHOW DQ ALL INVALID TABLE lightning.metastore.usl_demo.sic_edgar_usl",
+          "status": "SUCCESS",
+          "row_count": 1,
+          "engine": "SQLiteRelationalWarehouse"
+        }
+      ]
+    }
+  },
+  "agents": [
+    {
+      "name": "ScoutGuardAgent",
+      "role": "5-layer intent guard, H-MEM recall, signs the HMAC ExecutionContract"
+    },
+    {
+      "name": "PlannerAgent",
+      "role": "Decomposes the question into falsifiable hypotheses and a retrieval plan"
+    },
+    {
+      "name": "DataRetrieverAgent",
+      "role": "Runs the plan on Zetaris and grounds rows in the World Model"
+    },
+    {
+      "name": "EvidenceEvaluatorAgent",
+      "role": "Runs its own DQ check; blocks claims without row-level provenance"
+    },
+    {
+      "name": "MarkovianAnalystAgent",
+      "role": "Bounded-chunk analysis; drafts and revises candidate claims"
+    },
+    {
+      "name": "ExplanationWriterAgent",
+      "role": "Writes the executive explanation from verified findings only"
+    },
+    {
+      "name": "FinalReviewerAgent",
+      "role": "Audits caveats and causal language; mines verified rules into H-MEM"
+    }
+  ],
+  "trace_id": "example-2-warm-compounding",
+  "log_file": "logs/trace-example-2-warm-compounding.jsonl",
+  "execution_time_seconds": 0.134,
+  "error": null,
+  "agents_used": [
+    "ScoutGuardAgent",
+    "PlannerAgent",
+    "DataRetrieverAgent",
+    "EvidenceEvaluatorAgent",
+    "MarkovianAnalystAgent",
+    "ExplanationWriterAgent",
+    "FinalReviewerAgent"
+  ],
+  "result": {
+    "summary": "Investigation for \"Re-evaluate our Computer & Office Equipment enterprise exposure and SLA risk for Q4, incorporating our resolved SIC taxonomy rules and regio\" (focus: Computer & Office Equipment). Q3 net revenue retention in the focus cohort contracted: 86.99% across 7 accounts (-$2.47M ARR, 310 contract events) vs 101.67% across 3 comparison accounts. (1) Forward risk: Computer & Office Equipment carries $2.08M in Q4 weather SLA penalty exposure, led by IBM $620K in us-east-ny, CSCO $390K in us-east-nc, WDC $280K in us-west-ca. (2) Operational driver (correlational): P1 escalations 13->88, p99 latency up to 2,140ms, timeout rate r=0.962 with retention loss, $530K SLA credits. (3) Taxonomic data blindspot: INTERNATIONAL BUSINESS MACHINES CORP (CIK 0000051143) files under summary SIC 3570, which a naive EDGAR x SIC join drops ($62.753B FY2025 revenue); the H-MEM reconciliation rule recalled at chunk 0 kept it in the Pass 1 join, reconciled to leaf 3571. Blocked as untested (no supporting rows in Zetaris): H4 Enterprise Pricing-Tier & Rate-Card Change Impact; H_EXT Competitor Contract Displacement / Bundling.",
+    "findings": [
+      {
+        "finding_id": "F1_OPERATIONAL_LATENCY_DRIVER",
+        "title": "Operational degradation co-moves with retention loss (top cause: v4.2_batch_connector_gateway_timeout)",
+        "confidence": 0.84,
+        "evidence_type": "correlational",
+        "evidence_tables": [
+          "ops.support_tickets_usage",
+          "erp.customer_churn_billing"
+        ],
+        "metrics": {
+          "cohort_q2_p1_tickets": 13,
+          "cohort_q3_p1_tickets": 88,
+          "p1_escalation_multiplier": "6.77x",
+          "peak_p99_latency_ms": 2140,
+          "peak_p99_account": "INTERNATIONAL BUSINESS MACHINES CORP",
+          "correlation_with_retention_drop_r": 0.962,
+          "correlation_ci95": {
+            "low": 0.843,
+            "high": 0.991
+          },
+          "multivariate_correlations": {
+            "timeout_rate_vs_retention_loss_r": 0.962,
+            "p99_latency_vs_retention_loss_r": 0.973,
+            "p1_escalations_vs_retention_loss_r": 0.944,
+            "mttr_hours_vs_retention_loss_r": 0.969,
+            "timeout_vs_retention_loss_r": 0.962,
+            "latency_vs_retention_loss_r": 0.973
+          },
+          "root_causes_by_q3_p1_tickets": {
+            "v4.2_batch_connector_gateway_timeout": 51,
+            "storage_telemetry_stream_backpressure": 22,
+            "terminal_heartbeat_webhook_drop": 15
+          },
+          "sla_credits_issued_usd": 530000
+        },
+        "explanation": "In Computer & Office Equipment, Q3 P1 escalations went 13->88, led by v4.2_batch_connector_gateway_timeout, storage_telemetry_stream_backpressure, terminal_heartbeat_webhook_drop; p99 latency peaked at 2,140ms (INTERNATIONAL BUSINESS MACHINES CORP). Across all 10 accounts, timeout rate correlates with retention loss at r=0.962. $530K in SLA credits were issued; cohort NRR 86.99% (-$2.47M ARR)."
+      },
+      {
+        "finding_id": "F2_TAXONOMIC_BLINDSPOT_IBM_3570",
+        "title": "SEC EDGAR SIC 3570 vs. US SIC V4 leaf orphan ($62.753B revenue blindspot)",
+        "confidence": 0.99,
+        "evidence_type": "structural",
+        "evidence_tables": [
+          "lightning.datasource.rest.sec_edgar",
+          "lightning.datasource.rest.company_dns",
+          "lightning.metastore.usl_demo.sic_edgar_usl"
+        ],
+        "metrics": {
+          "orphan_cik": "0000051143",
+          "orphan_company": "INTERNATIONAL BUSINESS MACHINES CORP",
+          "edgar_reported_sic": "3570",
+          "reconciled_leaf_sic": "3571",
+          "resolution_source": "hmem",
+          "leaf_policy": "primary_leaf",
+          "leaf_candidates": [
+            "3571",
+            "3572",
+            "3575",
+            "3577",
+            "3578",
+            "3579"
+          ],
+          "restored_fy2025_revenue_usd": 62753000000,
+          "restored_q3_arr_usd": 4120000,
+          "q3_arr_delta_usd": -730000
+        },
+        "explanation": "Zetaris DQ rule fk_sic_check shows INTERNATIONAL BUSINESS MACHINES CORP (CIK 0000051143) files under SEC SIC 3570, which is not a 4-digit leaf in company_dns.sic_codes. A naive inner join silently drops its $62.753B FY2025 revenue and -$730K Q3 ARR movement. Reconciled under Division D (Manufacturing) -> Major Group 35 -> Industry Group 357 -> Leaf 3571 (Electronic Computers). Leaf chosen by the primary_leaf policy among 3571, 3572, 3575, 3577, 3578, 3579; industry-group totals are the same whichever leaf is chosen."
+      },
+      {
+        "finding_id": "F3_Q4_REGIONAL_WEATHER_SLA_EXPOSURE",
+        "title": "Q4 regional weather SLA exposure ($2.08M in Computer & Office Equipment)",
+        "confidence": 0.97,
+        "evidence_type": "direct",
+        "evidence_tables": [
+          "erp.customer_churn_billing"
+        ],
+        "metrics": {
+          "cohort_weather_sla_exposure_usd": 2085000,
+          "top_accounts": [
+            {
+              "ticker": "IBM",
+              "account_name": "INTERNATIONAL BUSINESS MACHINES CORP",
+              "region": "us-east-ny",
+              "exposure_usd": 620000
+            },
+            {
+              "ticker": "CSCO",
+              "account_name": "CISCO SYSTEMS INC",
+              "region": "us-east-nc",
+              "exposure_usd": 390000
+            },
+            {
+              "ticker": "WDC",
+              "account_name": "WESTERN DIGITAL CORP",
+              "region": "us-west-ca",
+              "exposure_usd": 280000
+            }
+          ],
+          "by_region": {
+            "us-west-ca": 685000,
+            "us-east-ny": 620000,
+            "us-east-nc": 540000,
+            "us-midwest-oh": 240000
+          }
+        },
+        "explanation": "Computer & Office Equipment carries $2.08M in Q4 weather SLA penalty exposure, led by IBM $620K in us-east-ny, CSCO $390K in us-east-nc, WDC $280K in us-west-ca."
+      }
+    ],
+    "confidence": 0.883
+  },
+  "collaboration": {
+    "feedback_loop_completed": true,
+    "revision_count": 1,
+    "evaluator_findings": [
+      "1 issue(s): missing_caveat_coverage (missing H4, H_EXT, 0.962). Returning needs_revision to ExplanationWriterAgent.",
+      "H4: Q3 pricing-tier increases contributed to contraction in Computer & Office Equipment. -> No row-level provenance (pricing_tier_changes: TABLE_NOT_FOUND, 0 rows).",
+      "C_UF_COMPETITOR_DISPLACEMENT: Competitor Contract Displacement / Bundling contributed to contraction in Computer & Office Equipment. -> No row-level provenance (competitor_loss_reasons: TABLE_NOT_FOUND, 0 rows)."
+    ]
+  },
+  "log_path": "logs/trace-example-2-warm-compounding.jsonl"
 }

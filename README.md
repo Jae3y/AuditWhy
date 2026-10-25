@@ -2,6 +2,10 @@
 
 > **One-Sentence Pitch:** AuditWhy is an autonomous 6-agent investigative system that explains *why* enterprise retention and revenue metrics diverge across fragmented systems—autonomously catching cross-source taxonomic blindspots (such as IBM's `$62.753B` SEC EDGAR SIC `3570` foreign-key orphan via Zetaris Data Quality rules), blocking unverified causal claims, and compounding institutional memory across runs via Meterless Engines, Nightshift Runtime 1.4, and NVIDIA Nemotron.
 
+**Track:** The Agent That Can Explain Why · **Sponsor tech:** Zetaris (data) · Meterless Engines + Nightshift (build/power) · NVIDIA Nemotron (models) · Cursor (dev) · **Run:** `python run.py` → `POST /run`
+
+[![CI](https://github.com/Jae3y/AuditWhy/actions/workflows/ci.yml/badge.svg)](https://github.com/Jae3y/AuditWhy/actions/workflows/ci.yml) [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FJae3y%2FAuditWhy&project-name=auditwhy)
+
 ---
 
 ## Hackathon Track Alignment (Open Agent Hackathon 2026)
@@ -121,8 +125,8 @@ python -m venv .venv
 # Linux / macOS:
 # source .venv/bin/activate
 
-# 2. Install dependencies
-pip install -r requirements.txt
+# 2. Install dependencies (requirements.txt = runtime only; -dev adds pytest)
+pip install -r requirements-dev.txt
 
 # 3. Copy environment template (defaults to SAMPLE_MODE=true, PORT=8000)
 cp .env.example .env
@@ -168,7 +172,22 @@ python run.py
 docker build -t auditwhy:latest .
 docker run --rm -p 8000:8000 -e PORT=8000 -e SAMPLE_MODE=true -e AUDITWHY_ADMIN_TOKEN=change-me auditwhy:latest
 ```
-Inside Docker the browser is not a loopback client, so the credentials panel needs the admin token (there is a field for it in the dashboard).
+Inside Docker the browser is not a loopback client, so the credentials panel needs the admin token (there is a field for it in the dashboard). For live mode use `docker run --rm -p 8000:8000 --env-file .env auditwhy:latest`, and replace `localhost` / `127.0.0.1` in `.env` with `host.docker.internal`, because inside a container `localhost` is the container itself.
+
+### 5. Live Mode: Zetaris + Meterless Nightshift + NVIDIA Nemotron
+Per the Participant Setup Guide, Zetaris and Nightshift run **on your machine**. The app never holds your NVIDIA key.
+
+1. **Zetaris:** register at `cloud.enterprise.zetaris.com`, download the platform bundle, then `docker compose up -d` and `./verify.sh` (expect 9/9). Create an API token in the UI at `http://localhost:3000` under **Management > API Tokens > +**.
+2. **Official USL + DQ rule:** in a clone of [zetaris/getting-started](https://github.com/zetaris/getting-started), run `python3 scripts/onboard.py run sic_edgar_usl --dry-run`, then run it again without `--dry-run`. This builds `lightning.metastore.usl_demo.sic_edgar_usl`, whose foreign-key DQ rule flags IBM's SIC 3570 against live SEC EDGAR data.
+3. **AuditWhy's internal tables:** `python scripts/zetaris_onboard.py` prints the statements (dry run). `python scripts/zetaris_onboard.py --apply` registers ERP billing, support telemetry, EDGAR facts and SIC leaves as Zetaris REST tables plus `auditwhy.*` views, from this repo's `data/zetaris/*.json`, then verifies row counts.
+4. **Nightshift:** install it from meterless.ai and leave it running. Paste your `nvapi-` key into **Nightshift > Providers > NVIDIA** and give a lane a Nemotron model, e.g. `nvidia/nemotron-3.5-lightning-30b-a3b`. Copy the runtime URL and token from **Nightshift > Console**.
+5. **`.env`:** set `ZETARIS_API_KEY`, `METERLESS_RUNTIME_TOKEN` and `SAMPLE_MODE=false`. Optionally pin a Nemotron lane with `METERLESS_MODEL=meterless/...`.
+6. **Verify:** `python scripts/live_check.py` runs the setup guide's checks (Zetaris `SELECT 1`, every mapped table, the official DQ target, Nightshift `/v1/models`, a real completion, and which model served it). Then run `python run.py --input input_examples/example_1.json --output output_examples/live_example_1.json`.
+
+The agents query canonical names (`edgar.company_facts`, `erp.customer_churn_billing`, ...). `data/zetaris_table_map.json` maps them to what exists on your instance; override it with `ZETARIS_TABLE_MAP` if you used different names. `provider_routing.calls[].served_by` records the concrete Nemotron model behind each Nightshift routing mode, which is the evidence the NVIDIA Nemotron award asks for.
+
+### 6. Public Demo (Vercel)
+The **Deploy with Vercel** button above (or importing the repo at vercel.com/new) deploys `api/index.py` with zero configuration. A hosted instance has no route to your local Zetaris or Nightshift, so it always runs sample mode: the full agent loop on `data/sample/`, with credential editing disabled. Traces and H-MEM live in `/tmp`, so compounding persists only while an instance stays warm. For the live stack, run locally (section 5).
 
 ---
 
@@ -228,11 +247,15 @@ Rules are scored by outcome. A recalled rule that restores its filer gets `helpf
    - Issues **HMAC-SHA256 signed `ExecutionContract`s** (`signedBy: "scout"`, 300s TTL) verified before every Zetaris tool call. Without `SCOUT_HMAC_KEY` the key is random per process, so contracts cannot be forged from a public default.
 
 ### 3. Power Layer: Meterless Nightshift Runtime 1.4 & NVIDIA Nemotron (`app/adapters/meterless_provider.py` & `app/llm.py`)
-- Implements **Provider Contract v4**: URL normalisation to `<scheme>://<host>/v1` (never `/v1/v1`), `parse_connect_link()` for `/connect#k=...&m=...&n=...`, immediate rejection of placeholder token `rt-local`, `/v1/models` live discovery across ports `8088, 8090, 8787, 11434`, and mandatory headers (`Authorization: Bearer <token>`, `meterless-app: auditwhy`, `meterless-scope: user`).
-- **Task Routing (`plan_route`):**
-  - `plan` / `retrieve` $\rightarrow$ `meterless/text.fast` / NVIDIA NIM `nvidia/nemotron-3.5-lightning-30b-a3b`
-  - `evaluate` / `grade` $\rightarrow$ `meterless/judge.deep` / NVIDIA NIM `nvidia/nemotron-3-ultra-550b-a55b` (`enable_thinking: True`, sent as the top-level `chat_template_kwargs` field)
-  - `analyze` / `synthesize` $\rightarrow$ `meterless/text.auto` / NVIDIA NIM `nvidia/nemotron-3.5-super-vl-120b-a12b`
+- **Nightshift is the primary provider** (Power rule): every agent model call goes to the OpenAI-compatible runtime with `Authorization: Bearer $METERLESS_RUNTIME_TOKEN`, `meterless-app: auditwhy` and `meterless-scope: user`, using a 180 s timeout. Nemotron is reached *through* Nightshift: the NVIDIA key lives only in Nightshift > Providers.
+- Implements **Provider Contract v4**: URL normalisation to `<scheme>://<host>/v1` (never `/v1/v1`), Quick Connect links (`/connect#k=...`), immediate rejection of the placeholder `rt-local`, and a token read from env or `<stateDir>/proxy-token`. `GET /v1/models` decides status (401/403 → unauthorized; 200 with `meterless/*` ids → online; anything else → offline). Auto Detect covers ports 8088/8090/8787/11434 on `127.0.0.1`, `localhost` and `[::1]`.
+- **Task routing (`plan_route`) uses routing modes, not model names:**
+  - `plan` / `retrieve` → `meterless/text.fast` (fast lane, e.g. `nvidia/nemotron-3.5-lightning-30b-a3b`)
+  - `evaluate` / `grade` → `meterless/judge.deep` (deep/judge lane, e.g. `nvidia/nemotron-3-ultra-550b-a55b`)
+  - `analyze` / `synthesize` → `meterless/text.auto`
+
+  A mode the runtime doesn't advertise falls back to `meterless/auto`, unknown `meterless/*` ids are kept, and `METERLESS_MODEL` pins one lane for every task. Each call records `served_by`, the concrete model that answered.
+- **Optional direct Nemotron fallback** ("Option B" in the setup guide): if Nightshift is down and `NVIDIA_API_KEY` / `MODEL_API_KEY` is set, calls go to `integrate.api.nvidia.com` with the same lanes (`enable_thinking` sent as top-level `chat_template_kwargs`, with 2/4/8 s backoff on 429).
 - **Division of labour:** verdicts (DQ, claim gates, reviewer gates) are always computed in code, so `SAMPLE_MODE=true` and a live run reach identical conclusions. Nemotron contributes the narrative for each Markovian chunk, the evaluator summaries, and the writer's executive narrative. Offline, each agent supplies its own data-derived text instead. Provider failures are recorded per call in `provider_routing.calls[].fallback_reasons`, never swallowed.
 
 ### 4. Development Layer: Cursor Workflow
@@ -280,6 +303,27 @@ GitHub Actions (`.github/workflows/ci.yml`) runs the test suite, conformance, sm
 - `tests/test_security.py`: engine-level write refusal, read-only workbench, `run_id` traversal, admin gating and key-redirect protection, `.env` injection, Luhn PII redaction, the shared rate limit, the non-public signing key, dashboard escaping, and the Nemotron `chat_template_kwargs` payload.
 
 ---
+
+## API Contract (`POST /run`)
+Accepts the judge payload `{run_id, input: {query}, options: {sample_mode, warm_memory_seed, max_retries}}` or the Vibe Coding payload `{request_id, user_query, context}`. Besides the detailed fields, every response carries the Technical Execution Requirements shape `{run_id, status, output: {summary, recommendations, artifacts}, agents: [{name, role}], trace_id, log_file, execution_time_seconds}`. It also carries the Vibe Coding shape `{agents_used, result: {summary, findings, confidence}, collaboration: {feedback_loop_completed, revision_count, evaluator_findings}, log_path}`. Failures return `status: "error"` with `error: {type, message, recoverable}` and the partial trace. Malformed input gets a 400/422, and a query over 4,000 characters gets a 413.
+
+## AI and Model Usage
+| Role | Model / service | Where |
+| :--- | :--- | :--- |
+| Narrative for Markovian chunks, evaluator summaries, executive narrative | Meterless Nightshift routing modes (`meterless/text.fast`, `meterless/judge.deep`, `meterless/text.auto`) backed by NVIDIA Nemotron lanes; optional direct `integrate.api.nvidia.com` fallback | `app/llm.py`, `app/adapters/meterless_provider.py` |
+| Verdicts: DQ, claim gates, statistics, reviewer gates | Deterministic code (no model) | `app/agents/evaluator.py`, `app/agents/reviewer.py`, `app/analytics.py` |
+| Memory, long-task reasoning, shared state, intent guard | Meterless Engines (H-MEM, Markovian, World Model, Scout Intent), implemented from the AGENTS.md specs | `app/engines/` |
+| Data access, USL, data quality | Zetaris Lightning SQL over REST, with the official `sic_edgar_usl` FK rule | `app/adapters/zetaris.py`, `scripts/zetaris_onboard.py` |
+| Embeddings | None (H-MEM uses a deterministic hashed embedding) | `app/engines/hmem.py` |
+| Development | Cursor (Agent chat) and Claude Code as coding assistants; every change was reviewed and tested | — |
+
+**Sample mode** (`SAMPLE_MODE=true`) runs the same agent logic on cached data in `data/sample/`. No output is pre-written, and each agent supplies data-derived text where a model would write narrative. **Data:** SEC EDGAR revenue and the SIC hierarchy follow public sources (SEC EDGAR, Company-DNS US SIC V4). ERP billing and support telemetry are **synthetic** and labelled as such in `data/README.md`.
+
+## Third-Party Code and Licences
+FastAPI (MIT), Uvicorn (BSD-3), Pydantic (MIT), HTTPX (BSD-3), Tenacity (Apache-2.0), python-dotenv (BSD-3), pytest (MIT, dev only). The Meterless engine designs follow the Apache-2.0 specs at github.com/Meterless/Meterless. The Lightning SQL patterns in `scripts/zetaris_onboard.py` follow the Apache-2.0 zetaris/getting-started repo. No third-party source code was copied.
+
+## Demo Video
+`OAH2026-AuditWhy-ExplainWhy-Demo.mp4`: link to be added before submission. The narration follows `python scripts/demo.py --pause`.
 
 ## Limitations & Pre-Existing Declarations
 - **Pre-Existing Code / Assets:** **None.** Every line of code, SQL script, sample dataset, engine implementation, and test in this repository was built from scratch for the Open Agent Hackathon 2026.

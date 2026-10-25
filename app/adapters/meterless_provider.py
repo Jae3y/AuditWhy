@@ -20,7 +20,8 @@ import httpx
 from app.config import settings
 
 AUTODETECT_PORTS = (8088, 8090, 8787, 11434)
-AUTODETECT_HOSTS = ("127.0.0.1", "localhost")
+AUTODETECT_HOSTS = ("127.0.0.1", "localhost", "[::1]")
+DEFAULT_ROUTING_MODE = "meterless/auto"
 
 
 class MeterlessAuthError(PermissionError):
@@ -181,8 +182,24 @@ class MeterlessProviderClient:
         else:
             self.base_url = normalize_base_url(base_url or settings.meterless_base_url)
             self.api_key = (api_key if api_key is not None else settings.meterless_api_key).strip()
-            self.default_model = "meterless/auto"
+            self.default_model = DEFAULT_ROUTING_MODE
             self.app_name = (app_name or settings.meterless_app_name).strip() or "auditwhy"
+        self.available_models: List[str] = []  # filled by probe_status() from GET /v1/models
+
+    def resolve_model(self, task: str) -> str:
+        """Pick the routing mode for a task.
+
+        A METERLESS_MODEL pin wins (use it to lock a Nemotron-backed lane for award evidence). Otherwise the task's
+        class.disposition is used when the runtime advertises it, falling back to meterless/auto, which every
+        runtime serves. Routing modes not recognised here are kept, never rewritten.
+        """
+        pinned = settings.meterless_model
+        if pinned:
+            return pinned
+        wanted = plan_route(task)["meterless_model"]
+        if not self.available_models or wanted in self.available_models:
+            return wanted
+        return DEFAULT_ROUTING_MODE if DEFAULT_ROUTING_MODE in self.available_models else self.available_models[0]
 
     def build_headers(self, scope: str = "user") -> Dict[str, str]:
         if not is_valid_meterless_token(self.api_key):
@@ -230,15 +247,16 @@ class MeterlessProviderClient:
                         for m in body.get("data", [])
                         if isinstance(m, dict)
                     ]
-                    has_meterless_ids = any(m.startswith("meterless/") for m in models_list)
-                    if has_meterless_ids or models_list:
+                    # Contract v4: only "200 with meterless ids" is online; a generic OpenAI server is not Nightshift.
+                    if any(m.startswith("meterless/") for m in models_list):
                         if not is_valid_meterless_token(self.api_key):
                             return {
                                 "status": "unauthorized",
                                 "base_url": self.base_url,
                                 "models": models_list,
-                                "reason": "Valid API key required.",
+                                "reason": "Valid runtime token required.",
                             }
+                        self.available_models = models_list
                         return {
                             "status": "online",
                             "base_url": self.base_url,
@@ -298,10 +316,10 @@ class MeterlessProviderClient:
         max_tokens: int = 1024,
     ) -> Dict[str, Any]:
         """Execute a chat completion request against Meterless Nightshift Runtime 1.4 (180s timeout)."""
-        route = plan_route(task)
+        model = self.resolve_model(task)
         headers = self.build_headers(scope="user")
         payload = {
-            "model": route["meterless_model"],
+            "model": model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -319,7 +337,8 @@ class MeterlessProviderClient:
             )
             return {
                 "provider": "meterless_nightshift_1.4",
-                "model": route["meterless_model"],
-                "content": content,
-                "raw": data,
+                "model": model,
+                # The runtime reports which concrete model served the routing mode (e.g. a Nemotron lane).
+                "served_by": data.get("model", ""),
+                "content": content if isinstance(content, str) else str(content or ""),
             }
