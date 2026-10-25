@@ -325,7 +325,7 @@ Accepts the judge payload `{run_id, input: {query}, options: {sample_mode, warm_
 FastAPI (MIT), Uvicorn (BSD-3), Pydantic (MIT), HTTPX (BSD-3), Tenacity (Apache-2.0), python-dotenv (BSD-3), pytest (MIT, dev only). The Meterless engine designs follow the Apache-2.0 specs at github.com/Meterless/Meterless. The Lightning SQL patterns in `scripts/zetaris_onboard.py` follow the Apache-2.0 zetaris/getting-started repo. No third-party source code was copied.
 
 ## Demo Video
-`OAH2026-AuditWhy-ExplainWhy-Demo.mp4`: link to be added before submission. The narration follows `python scripts/demo.py --pause`.
+`OAH2026-AuditWhy-ExplainWhy-Demo.mp4`: link to be added before submission. The timed script is in [docs/SUBMISSION.md](docs/SUBMISSION.md), and the terminal segment uses `python scripts/demo.py --pause`. The form answers and the sponsor-technology explanation are in the same file.
 
 ## Limitations & Pre-Existing Declarations
 - **Pre-Existing Code / Assets:** **None.** Every line of code, SQL script, sample dataset, engine implementation, and test in this repository was built from scratch for the Open Agent Hackathon 2026.
