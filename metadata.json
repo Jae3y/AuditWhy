@@ -38,9 +38,9 @@
       ]
     },
     "development_workflow": {
-      "sponsor": "Cursor",
+      "tool": "Claude Code (Cursor optional per the 22 Oct onboarding-guide update)",
       "components": [
-        "Multi-file architectural synthesis, AGENTS.md contract conformance verification, and iterative test-driven refinement"
+        "AGENTS.md contract conformance verification and iterative test-driven refinement"
       ]
     }
   },

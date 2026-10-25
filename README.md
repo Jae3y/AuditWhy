@@ -2,7 +2,7 @@
 
 > **One-Sentence Pitch:** AuditWhy is an autonomous 6-agent investigative system that explains *why* enterprise retention and revenue metrics diverge across fragmented systems—autonomously catching cross-source taxonomic blindspots (such as IBM's `$62.753B` SEC EDGAR SIC `3570` foreign-key orphan via Zetaris Data Quality rules), blocking unverified causal claims, and compounding institutional memory across runs via Meterless Engines, Nightshift Runtime 1.4, and NVIDIA Nemotron.
 
-**Track:** The Agent That Can Explain Why · **Sponsor tech:** Zetaris (data) · Meterless Engines + Nightshift (build/power) · NVIDIA Nemotron (models) · Cursor (dev) · **Run:** `python run.py` → `POST /run`
+**Track:** The Agent That Can Explain Why · **Sponsor tech:** Zetaris (data) · Meterless Engines + Nightshift (build/power) · NVIDIA Nemotron (models) · **Run:** `python run.py` → `POST /run`
 
 **Live demo:** https://auditwhy.vercel.app (sample mode, no login; `POST https://auditwhy.vercel.app/run` accepts the same payloads as `input_examples/`)
 
@@ -260,8 +260,9 @@ Rules are scored by outcome. A recalled rule that restores its filer gets `helpf
 - **Optional direct Nemotron fallback** ("Option B" in the setup guide): if Nightshift is down and `NVIDIA_API_KEY` / `MODEL_API_KEY` is set, calls go to `integrate.api.nvidia.com` with the same lanes (`enable_thinking` sent as top-level `chat_template_kwargs`, with 2/4/8 s backoff on 429).
 - **Division of labour:** verdicts (DQ, claim gates, reviewer gates) are always computed in code, so `SAMPLE_MODE=true` and a live run reach identical conclusions. Nemotron contributes the narrative for each Markovian chunk, the evaluator summaries, and the writer's executive narrative. Offline, each agent supplies its own data-derived text instead. Provider failures are recorded per call in `provider_routing.calls[].fallback_reasons`, never swallowed.
 
-### 4. Development Layer: Cursor Workflow
-- Built using Cursor's multi-file architectural synthesis and iterative test-driven conformance harness (`scripts/run_conformance.py` and `tests/`) to verify strict compliance across all 4 `AGENTS.md` engine specs and the Provider v4 contract.
+### 4. Development workflow
+- Built with Claude Code as the AI coding assistant. Cursor is optional per the 22 Oct onboarding-guide update.
+- A test-driven conformance harness (`scripts/run_conformance.py` and `tests/`) verifies compliance with all four `AGENTS.md` engine specs and the Provider v4 contract.
 
 ---
 
@@ -317,7 +318,7 @@ Accepts the judge payload `{run_id, input: {query}, options: {sample_mode, warm_
 | Memory, long-task reasoning, shared state, intent guard | Meterless Engines (H-MEM, Markovian, World Model, Scout Intent), implemented from the AGENTS.md specs | `app/engines/` |
 | Data access, USL, data quality | Zetaris Lightning SQL over REST, with the official `sic_edgar_usl` FK rule | `app/adapters/zetaris.py`, `scripts/zetaris_onboard.py` |
 | Embeddings | None (H-MEM uses a deterministic hashed embedding) | `app/engines/hmem.py` |
-| Development | Cursor (Agent chat) and Claude Code as coding assistants; every change was reviewed and tested | — |
+| Development | Claude Code as the coding assistant; every change was reviewed and tested | — |
 
 **Sample mode** (`SAMPLE_MODE=true`) runs the same agent logic on cached data in `data/sample/`. No output is pre-written, and each agent supplies data-derived text where a model would write narrative. **Data:** SEC EDGAR revenue and the SIC hierarchy follow public sources (SEC EDGAR, Company-DNS US SIC V4). ERP billing and support telemetry are **synthetic** and labelled as such in `data/README.md`.
 

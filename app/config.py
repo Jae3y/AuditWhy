@@ -10,6 +10,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Verify TLS against the operating system's trust store (Windows/macOS keychains), so machines whose network or
+# antivirus inserts its own root CA still validate certificates properly instead of failing or disabling checks.
+try:
+    import truststore
+
+    truststore.inject_into_ssl()
+except ImportError:  # optional: certifi's bundle is used when truststore is not installed
+    pass
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
 SAMPLE_DATA_DIR = DATA_DIR / "sample"

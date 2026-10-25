@@ -104,7 +104,8 @@ class LLMRouter:
                     return {**res, "is_live": True}
                 errors.append("nvidia_nim: empty completion")
             except Exception as exc:  # noqa: BLE001
-                errors.append(f"nvidia_nim: {type(exc).__name__}")
+                code = getattr(getattr(exc, "response", None), "status_code", None)
+                errors.append(f"nvidia_nim: {type(exc).__name__}" + (f" HTTP {code}" if code else ""))
 
         # Priority 3: data-grounded deterministic text supplied by the calling agent
         provider_label = f"{DETERMINISTIC_PROVIDER} (nemotron-route-simulated)"
@@ -130,21 +131,25 @@ class LLMRouter:
             "Authorization": f"Bearer {settings.nvidia_api_key}",
             "Content-Type": "application/json",
         }
+        thinking = bool(route.get("enable_thinking"))
         payload: Dict[str, Any] = {
             "model": route["nvidia_model"],
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": max_tokens,
+            # Hidden reasoning tokens count against max_tokens, so the judge lane gets extra room.
+            "max_tokens": max_tokens * 4 if thinking else max_tokens,
+            # Raw HTTP: chat_template_kwargs is a top-level field (`extra_body` only exists in the OpenAI SDK).
+            # Nemotron 3.5 reasons by default and can spend a whole budget on hidden reasoning, so every lane
+            # states its mode explicitly.
+            "chat_template_kwargs": {"enable_thinking": thinking},
         }
-        if route.get("enable_thinking"):
-            # Raw HTTP: chat_template_kwargs is a top-level field. (`extra_body` only exists in the OpenAI SDK.)
-            payload["chat_template_kwargs"] = {"enable_thinking": True}
 
         backoff_delays = [2.0, 4.0, 8.0]
         with httpx.Client(timeout=60.0) as client:
             for attempt in range(len(backoff_delays) + 1):
                 resp = client.post(url, headers=headers, json=payload)
-                if resp.status_code == 429 and attempt < len(backoff_delays):
+                # Rate limits and transient gateway errors on the hosted endpoints are retried with backoff.
+                if resp.status_code in (429, 500, 502, 503, 504) and attempt < len(backoff_delays):
                     time.sleep(backoff_delays[attempt])
                     continue
                 resp.raise_for_status()

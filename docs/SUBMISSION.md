@@ -41,9 +41,14 @@ Everything the HackOS submission form asks for, ready to paste. Hard deadline: *
 
 The conformance suite (`scripts/run_conformance.py`, 7/7) and 77 tests verify them. **Nightshift** is the primary model provider: every agent model call goes to the OpenAI-compatible runtime with the runtime token and `meterless-app` / `meterless-scope` headers, under provider contract v4.
 
-**NVIDIA Nemotron.** Nemotron is reached through Nightshift lanes: a fast lane (`nemotron-3.5-lightning-30b-a3b`) for planning, and a deep/judge lane (`nemotron-3-ultra-550b-a55b`, thinking enabled) for evaluation. Each call records `served_by`, the concrete Nemotron model behind the routing mode. Nemotron writes the narrative for each reasoning chunk, the evaluator summaries and the executive explanation. Verdicts stay in code, so they are reproducible.
+**NVIDIA Nemotron.** Three Nemotron lanes, routed by task class:
+- a fast lane (`nemotron-3.5-lightning-30b-a3b`) for planning;
+- a deep/judge lane (`nemotron-3-ultra-550b-a55b`, thinking enabled) for evaluation;
+- a synthesis lane (`nemotron-3.5-super-vl-120b-a12b`) for the executive explanation.
 
-**Cursor.** Used as the development environment for scaffolding, refactoring and test generation. Every change was reviewed and covered by tests. Claude Code was used alongside as a coding assistant, which the AI Usage Policy permits.
+Nightshift is tried first, and each call records `served_by`, the concrete model behind the routing mode. When Nightshift isn't running, the same lanes are called directly on NVIDIA's hosted API (setup guide Option B). This path has been verified live: a full run of `example_1` made 8 of its 10 model calls through Lightning, Ultra and Super-VL. Each lane sets `enable_thinking` explicitly, so Nemotron 3.5 never spends the whole token budget on hidden reasoning. Nemotron writes the narrative; verdicts stay in code, so they are reproducible.
+
+**Coding tool.** Built with Claude Code as the AI coding assistant. Cursor is optional since the 22 Oct onboarding-guide update, and the AI Usage Policy permits any tool. Every change was reviewed and covered by tests.
 
 **What was unique.** The Evaluator doesn't trust the Retriever: it queries Zetaris itself to verify the joined evidence before any finding is approved. A data-quality error the agents discover becomes a reusable H-MEM rule, and that memory is trust-scored by outcome: a recalled rule that fails to restore its filer is penalised and superseded on the spot.
 
@@ -68,7 +73,7 @@ Record at 1080p with a large terminal font and the browser at 110–125% zoom. N
 | 0:50–1:40 | auditwhy.vercel.app: press **Investigate** on the cold example | "Here's a real run. Every number you see is computed from rows retrieved in this run, nothing is pre-written. In the trail on the right, step six is highlighted: the Evaluator found IBM filed under SIC 3570, a summary code the standard join drops, along with $62.75 billion of revenue. It sends the plan back, the Retriever expands the hierarchy, and the re-check passes." |
 | 1:40–2:20 | Scroll to the struck claims and the evidence ledger | "The Analyst proposed that pricing changes caused churn. The Evaluator checked the ledger, saw the pricing table returned no rows, and struck the claim. It's listed as untested, with exactly the data needed to test it. Correlations come with confidence intervals, and the caveat is mandatory." |
 | 2:20–2:50 | Terminal: `python scripts/demo.py --pause` acts 2 and 4 | "Memory compounds. A differently worded follow-up recalls the rule from H-MEM, skips the discovery, and finishes in fewer stages. And to prove it isn't scripted: change Oracle's SIC code in the data, and the agents catch the new orphan and recompute everything." |
-| 2:50–3:20 | Sponsor section of the README, then the trace JSONL | "Zetaris is the data layer and runs the data-quality rule. Meterless provides the four engines, and Nightshift is the model provider routing to NVIDIA Nemotron. It was built in Cursor. The output is an explanation an analyst can act on, with traceable evidence, stated limits and next steps." |
+| 2:50–3:20 | Sponsor section of the README, then the trace JSONL | "Zetaris is the data layer and runs the data-quality rule. Meterless provides the four engines, and Nightshift is the model provider routing to NVIDIA Nemotron. The output is an explanation an analyst can act on, with traceable evidence, stated limits and next steps." |
 
 **Live-mode cut (optional, if Zetaris and Nightshift are running):** show `python scripts/live_check.py` passing with a Nemotron model reported in `served_by`, and a live run of `input_examples/example_1.json`.
 
@@ -84,7 +89,8 @@ Record at 1080p with a large terminal font and the browser at 110–125% zoom. N
 | 3+ sample inputs and outputs, JSONL traces in `logs/` | Done |
 | No hardcoded outputs (perturbation tests in `tests/test_investigation_integrity.py`) | Done |
 | No committed secrets (`.env` gitignored; scan clean) | Done |
-| Zetaris and Meterless integrated, NVIDIA via Nightshift | Done in code; live run needs local Zetaris and Nightshift |
+| NVIDIA Nemotron live | Done: direct hosted route verified (8 of 10 calls live on `example_1`) |
+| Zetaris and Meterless integrated | Done in code. A live Zetaris run needs a local bundle or an AWS managed cluster (there is no shared instance). Live Nightshift needs the Windows desktop build. If neither is live at submission, say clearly which parts were tested against mocks, as Meterless asked |
 | Demo video 1–4 min, link opens in a private window | **To do** (script above) |
 | Slide deck (8 points) | Done; share or export it before submitting |
 | Submitted on HackOS before 23:45 UTC, 27 Oct | **To do** |
