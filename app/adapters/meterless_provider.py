@@ -22,6 +22,18 @@ from app.config import settings
 AUTODETECT_PORTS = (8088, 8090, 8787, 11434)
 AUTODETECT_HOSTS = ("127.0.0.1", "localhost", "[::1]")
 DEFAULT_ROUTING_MODE = "meterless/auto"
+MIN_COMPLETION_TOKENS = 800
+
+
+def strip_reasoning(content: str) -> str:
+    """Drop reasoning a lane leaked into the answer.
+
+    Some Nemotron lanes return their reasoning inline, with or without the opening <think> tag
+    ("...reasoning...</think>answer"), so everything up to the last closing tag is discarded.
+    """
+    if "</think>" in content:
+        content = content.rsplit("</think>", 1)[1]
+    return content.strip()
 
 
 class MeterlessAuthError(PermissionError):
@@ -322,7 +334,8 @@ class MeterlessProviderClient:
             "model": model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": max_tokens,
+            # Nemotron lanes reason before answering, and a small budget can come back empty (organisers: >= 500).
+            "max_tokens": max(max_tokens, MIN_COMPLETION_TOKENS),
         }
         with httpx.Client(timeout=180.0) as client:
             resp = client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
@@ -335,10 +348,12 @@ class MeterlessProviderClient:
                 .get("message", {})
                 .get("content", "")
             )
+            content = strip_reasoning(content if isinstance(content, str) else str(content or ""))
+            routing = data.get("meterless") or {}
             return {
                 "provider": "meterless_nightshift_1.4",
                 "model": model,
                 # The runtime reports which concrete model served the routing mode (e.g. a Nemotron lane).
-                "served_by": data.get("model", ""),
-                "content": content if isinstance(content, str) else str(content or ""),
+                "served_by": routing.get("routed_model") or data.get("model") or "",
+                "content": content,
             }

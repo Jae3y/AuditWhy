@@ -117,6 +117,27 @@ def test_chat_completion_reports_the_serving_model(monkeypatch) -> None:
     assert seen["body"]["model"] == "meterless/text.auto"
 
 
+def test_chat_completion_uses_routed_model_and_strips_leaked_reasoning(monkeypatch) -> None:
+    """Shape observed from Nightshift 1.2.7 on Windows: routing in `meterless`, reasoning leaked before </think>."""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={
+            "model": "meterless/auto",
+            "meterless": {"requested_model": "meterless/fast", "routed_model": "nvidia/nemotron-3-ultra-550b-a55b"},
+            "choices": [{"message": {"content": 'The user wants a one-word reply: "ready".</think>ready'}}],
+        })
+
+    monkeypatch.delenv("METERLESS_MODEL", raising=False)
+    _mock_runtime(monkeypatch, handler)
+    c = mp.MeterlessProviderClient(base_url="http://127.0.0.1:8088/v1", api_key="tok")
+    res = c.chat_completion(messages=[{"role": "user", "content": "hi"}], task="plan", max_tokens=200)
+    assert res["served_by"] == "nvidia/nemotron-3-ultra-550b-a55b"
+    assert res["content"] == "ready"
+    assert seen["body"]["max_tokens"] >= 500
+
+
 def test_autodetect_includes_ipv6_loopback() -> None:
     assert "[::1]" in mp.AUTODETECT_HOSTS
 
