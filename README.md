@@ -1,12 +1,49 @@
 # AuditWhy — Autonomous Multi-Agent Financial, Taxonomic & Operational Discrepancy Investigator
 
-> **One-Sentence Pitch:** AuditWhy is an autonomous 6-agent investigative system that explains *why* enterprise retention and revenue metrics diverge across fragmented systems—autonomously catching cross-source taxonomic blindspots (such as IBM's `$62.753B` SEC EDGAR SIC `3570` foreign-key orphan via Zetaris Data Quality rules), blocking unverified causal claims, and compounding institutional memory across runs via Meterless Engines, Nightshift Runtime 1.4, and NVIDIA Nemotron.
-
 **Track:** The Agent That Can Explain Why · **Sponsor tech:** Zetaris (data) · Meterless Engines + Nightshift (build/power) · NVIDIA Nemotron (models) · **Run:** `python run.py` → `POST /run`
 
 **Live demo:** https://auditwhy.vercel.app (sample mode, no login; `POST https://auditwhy.vercel.app/run` accepts the same payloads as `input_examples/`)
 
 [![CI](https://github.com/Jae3y/AuditWhy/actions/workflows/ci.yml/badge.svg)](https://github.com/Jae3y/AuditWhy/actions/workflows/ci.yml) [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FJae3y%2FAuditWhy&project-name=auditwhy)
+
+## What we built
+
+AuditWhy answers "why don't our numbers match?" for finance and risk analysts. You send a question such as *"Why did enterprise retention drop in Q3, and why doesn't our revenue reporting agree with SEC filings?"*. Seven agents then plan hypotheses, query every source through Zetaris and challenge each other's evidence. They return a cited explanation, with confidence intervals, a list of what could not be tested, and recommended actions. Any claim without supporting rows is struck out instead of asserted.
+
+## Problem
+
+The evidence for a metric discrepancy lives in disconnected systems: regulatory filings, an industry taxonomy, billing and support telemetry. A naive join between them loses data without any error. In our example, IBM files under SIC `3570`, a summary code that does not exist in the 4-digit leaf table. A standard join silently drops IBM and its $62.75B of revenue from every industry rollup. Analysts also reach for plausible stories ("pricing changes caused churn") that the data never tested. AuditWhy finds the first kind of problem and refuses the second.
+
+## Agents
+
+| Agent | Responsibility | Can block or send work back? |
+| :--- | :--- | :--- |
+| ScoutGuardAgent | Screens the question (5-layer guard), recalls H-MEM rules, signs an HMAC execution contract | Blocks injection, DDL and exfiltration attempts |
+| PlannerAgent | Writes falsifiable hypotheses H1–H4 and a retrieval plan | Revises the plan when the Evaluator rejects it |
+| DataRetrieverAgent | Verifies the contract, then queries every source through Zetaris SQL; grounds rows in the World Model | Expands the SIC hierarchy on a revision pass |
+| EvidenceEvaluatorAgent | Runs its own Zetaris DQ query and checks every claim against the evidence ledger (provenance and statistical gates) | Sends the plan back; strikes unsupported claims |
+| MarkovianAnalystAgent | Reasons in bounded Markovian chunks with compressed carryover; computes correlations with 95% CIs | Retries a chunk the Evaluator rejects |
+| ExplanationWriterAgent | Writes the executive explanation with SQL citations | Rewrites on Reviewer request |
+| FinalReviewerAgent | Enforces the correlation-vs-causation caveat and mines reusable rules into H-MEM | Sends the draft back to the Writer |
+
+## What makes this an agent system
+
+It is not a fixed pipeline. Two critique loops change what runs next:
+- the Evaluator rejects the joined evidence and sends the plan back for a hierarchy-expanding second retrieval;
+- the Reviewer rejects a draft without the caveat.
+
+Verdicts are computed in code from the rows retrieved in that run. Change the data (for example Oracle's SIC code) and the agents catch the new orphan and recompute; the perturbation tests in `tests/test_investigation_integrity.py` check this. Memory compounds across runs: a warm run recalls the reconciliation rule and skips a whole stage. Every step is written to a JSONL trace in `logs/`.
+
+## Data used
+
+| Source | Table | Origin |
+| :--- | :--- | :--- |
+| SEC EDGAR company facts | `edgar.company_facts` | Real public XBRL filings (`data.sec.gov`), 10 companies including IBM (SIC 3570) |
+| US SIC V4 taxonomy | `company_dns.sic_codes` | Public SIC leaf codes (`company-dns.mediumroast.io`) |
+| ERP billing cohorts | `erp.customer_churn_billing` | **Synthetic**, made for this project; deliberately has no pricing-change table |
+| Support and usage telemetry | `ops.support_tickets_usage` | **Synthetic**, made for this project |
+
+In live mode all four are registered in Zetaris as REST tables plus schemastore views (`scripts/zetaris_onboard.py`), alongside the official `sic_edgar_usl` semantic layer. In sample mode (`SAMPLE_MODE=true`, the default) the same files in `data/sample/` are served through a read-only SQL mirror, so anyone can run the full agent loop **with no credentials**. See `data/README.md`.
 
 ---
 
@@ -16,11 +53,11 @@
 | :--- | :--- | :--- |
 | **Primary Track** | **Track 02 — The Agent That Can Explain Why** | Moves beyond surface-level KPI reporting to falsifiable root-cause explanation: formulates 4 explicit hypotheses (`H1`–`H4`) that start `pending` and are decided only by retrieved rows, shows *why* Q3 retention dropped (timeout rate vs. retention loss `r = 0.962`, 95% CI `0.843..0.991`, computed live from `ops.support_tickets_usage`), proves *why* BI dashboards missed `$62.753B` in SEC revenue (the **IBM SIC 3570** summary-vs-leaf anomaly), blocks unsupported pricing and competitor claims through a generic provenance gate, and enforces a *Correlation vs. Causation & Untested Factors* caveat that the reviewer audits line by line. |
 | **Secondary Track** | **Track 01 — Solving Fragmented Intelligence** | Reconciles 4 disparate enterprise silos—SEC EDGAR XBRL filings (`edgar.company_facts`), US SIC V4 taxonomy (`company_dns.sic_codes`), ERP contract cohorts (`erp.customer_churn_billing`), and API/support telemetry (`ops.support_tickets_usage`)—into a single Zetaris Unified Semantic Layer (`sic_edgar_usl`) and an idempotent Meterless `World Model` (`ent_<sha256>`). |
-| **Secondary Track** | **Track 03 — Reasoning Architecture** | Implements a non-linear 6-agent critique-and-revision state machine backed by `Markovian` bounded-context chunk reasoning (`[STATE_CHECKPOINT]` $\rightarrow$ `[TASK_COMPLETE]`), `H-MEM` 8-factor hybrid recall at chunk 0, and `Scout Intent` 5-layer security + HMAC-SHA256 signed `ExecutionContract` enforcement. |
+| **Secondary Track** | **Track 03 — Reasoning Architecture** | Implements a non-linear 7-agent critique-and-revision state machine backed by `Markovian` bounded-context chunk reasoning (`[STATE_CHECKPOINT]` $\rightarrow$ `[TASK_COMPLETE]`), `H-MEM` 8-factor hybrid recall at chunk 0, and `Scout Intent` 5-layer security + HMAC-SHA256 signed `ExecutionContract` enforcement. |
 
 ---
 
-## System Architecture (6-Agent Non-Linear Loop + 3-Layer Sponsor Stack)
+## System Architecture (7-Agent Non-Linear Loop + 3-Layer Sponsor Stack)
 
 ```text
 +=========================================================================================+
@@ -117,7 +154,7 @@ Plays the whole story against a throwaway memory store, so it is identical on ev
 `--pause` waits for Enter between acts.
 
 ### 1. Local Virtual Environment (`SAMPLE_MODE=true` — Zero Credentials Required)
-Requires **Python 3.11+** (CI runs 3.11 and 3.12). Judges can run the entire 6-agent state machine, all 4 Meterless Engines, SQL execution over `data/sample/`, and test verification immediately with zero external API keys:
+Requires **Python 3.11+** (CI runs 3.11 and 3.12). Judges can run the entire 7-agent state machine, all 4 Meterless Engines, SQL execution over `data/sample/`, and test verification immediately with zero external API keys:
 
 ```bash
 # 1. Create and activate virtual environment
