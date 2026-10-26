@@ -219,8 +219,8 @@ Per the Participant Setup Guide, Zetaris and Nightshift run **on your machine**.
 1. **Zetaris:** register at `cloud.enterprise.zetaris.com`, download the platform bundle, then `docker compose up -d` and `./verify.sh` (expect 9/9). Create an API token in the UI at `http://localhost:3000` under **Management > API Tokens > +**.
 2. **Official USL + DQ rule:** in a clone of [zetaris/getting-started](https://github.com/zetaris/getting-started), run `python3 scripts/onboard.py run sic_edgar_usl --dry-run`, then run it again without `--dry-run`. This builds `lightning.metastore.usl_demo.sic_edgar_usl`, whose foreign-key DQ rule flags IBM's SIC 3570 against live SEC EDGAR data.
 3. **AuditWhy's internal tables:** `python scripts/zetaris_onboard.py` prints the statements (dry run). `python scripts/zetaris_onboard.py --apply` registers ERP billing, support telemetry, EDGAR facts and SIC leaves as Zetaris REST tables plus `auditwhy.*` views, from this repo's `data/zetaris/*.json`, then verifies row counts.
-4. **Nightshift:** install it from meterless.ai and leave it running. Paste your `nvapi-` key into **Nightshift > Providers > NVIDIA** and give a lane a Nemotron model, e.g. `nvidia/nemotron-3.5-lightning-30b-a3b`. Copy the runtime URL and token from **Nightshift > Console**.
-5. **`.env`:** set `ZETARIS_API_KEY`, `METERLESS_RUNTIME_TOKEN` and `SAMPLE_MODE=false`. Optionally pin a Nemotron lane with `METERLESS_MODEL=meterless/...`.
+4. **Nightshift:** install the desktop build (Windows: meterless.ai/windows.html; no NVIDIA GPU needed, since cloud lanes use NVIDIA's hosted API) and leave it running. Paste your `nvapi-` key into **Setup > Providers > Cloud provider keys > NVIDIA**, then restart Nightshift once so the engine loads the key. The runtime serves `http://127.0.0.1:8088/v1` and writes its token to `%LOCALAPPDATA%\ai.meterless.runtime\proxy-token` on Windows.
+5. **`.env`:** set `ZETARIS_API_KEY`, `SAMPLE_MODE=false`, and either `METERLESS_RUNTIME_TOKEN` or `METERLESS_TOKEN_FILE` (pointing at the `proxy-token` file, so the token is never copied). Optionally pin a lane with `METERLESS_MODEL`. Input files can also force a mode: `options.sample_mode` in a payload overrides the env value.
 6. **Verify:** `python scripts/live_check.py` runs the setup guide's checks (Zetaris `SELECT 1`, every mapped table, the official DQ target, Nightshift `/v1/models`, a real completion, and which model served it). Then run `python run.py --input input_examples/example_1.json --output output_examples/live_example_1.json`.
 
 The agents query canonical names (`edgar.company_facts`, `erp.customer_churn_billing`, ...). `data/zetaris_table_map.json` maps them to what exists on your instance; override it with `ZETARIS_TABLE_MAP` if you used different names. `provider_routing.calls[].served_by` records the concrete Nemotron model behind each Nightshift routing mode, which is the evidence the NVIDIA Nemotron award asks for.
@@ -288,12 +288,13 @@ Rules are scored by outcome. A recalled rule that restores its filer gets `helpf
 ### 3. Power Layer: Meterless Nightshift Runtime 1.4 & NVIDIA Nemotron (`app/adapters/meterless_provider.py` & `app/llm.py`)
 - **Nightshift is the primary provider** (Power rule): every agent model call goes to the OpenAI-compatible runtime with `Authorization: Bearer $METERLESS_RUNTIME_TOKEN`, `meterless-app: auditwhy` and `meterless-scope: user`, using a 180 s timeout. Nemotron is reached *through* Nightshift: the NVIDIA key lives only in Nightshift > Providers.
 - Implements **Provider Contract v4**: URL normalisation to `<scheme>://<host>/v1` (never `/v1/v1`), Quick Connect links (`/connect#k=...`), immediate rejection of the placeholder `rt-local`, and a token read from env or `<stateDir>/proxy-token`. `GET /v1/models` decides status (401/403 → unauthorized; 200 with `meterless/*` ids → online; anything else → offline). Auto Detect covers ports 8088/8090/8787/11434 on `127.0.0.1`, `localhost` and `[::1]`.
-- **Task routing (`plan_route`) uses routing modes, not model names:**
-  - `plan` / `retrieve` → `meterless/text.fast` (fast lane, e.g. `nvidia/nemotron-3.5-lightning-30b-a3b`)
-  - `evaluate` / `grade` → `meterless/judge.deep` (deep/judge lane, e.g. `nvidia/nemotron-3-ultra-550b-a55b`)
-  - `analyze` / `synthesize` → `meterless/text.auto`
+- **Task routing (`plan_route`) gives each agent lane its own Nemotron model:**
+  - `plan` / `retrieve` → `nvidia/nemotron-3.5-lightning-30b-a3b` (fast lane)
+  - `evaluate` / `grade` → `nvidia/nemotron-3-ultra-550b-a55b` (judge lane, thinking enabled)
+  - `analyze` / `synthesize` → `nvidia/nemotron-3.5-super-vl-120b-a12b`
 
-  A mode the runtime doesn't advertise falls back to `meterless/auto`, unknown `meterless/*` ids are kept, and `METERLESS_MODEL` pins one lane for every task. Each call records `served_by`, the concrete model that answered.
+  When Nightshift advertises a lane's model in `/v1/models`, AuditWhy requests it by id. On Nightshift 1.2.7 (Windows), the `meterless/deep` and `judge` modes all routed to the smallest lane, so requesting the model by id is what keeps the judge on Ultra. Otherwise the call uses the routing mode (`meterless/text.fast`, `meterless/judge.deep`, `meterless/text.auto`), falling back to `meterless/auto`. `METERLESS_MODEL` pins one lane for every task. Each call records `served_by`, the model Nightshift reports in `meterless.routed_model`. Reasoning that a lane leaks before `</think>` is stripped, and `max_tokens` has an 800 floor so reasoning lanes never return empty.
+- **Verified live (26 Oct 2026, Nightshift 1.2.7 on Windows):** a full `example_1` run made 10/10 model calls through Nightshift, with planning served by Lightning 30B and the evaluator by Ultra 550B. The verdicts were identical to sample mode.
 - **Optional direct Nemotron fallback** ("Option B" in the setup guide): if Nightshift is down and `NVIDIA_API_KEY` / `MODEL_API_KEY` is set, calls go to `integrate.api.nvidia.com` with the same lanes (`enable_thinking` sent as top-level `chat_template_kwargs`, with 2/4/8 s backoff on 429).
 - **Division of labour:** verdicts (DQ, claim gates, reviewer gates) are always computed in code, so `SAMPLE_MODE=true` and a live run reach identical conclusions. Nemotron contributes the narrative for each Markovian chunk, the evaluator summaries, and the writer's executive narrative. Offline, each agent supplies its own data-derived text instead. Provider failures are recorded per call in `provider_routing.calls[].fallback_reasons`, never swallowed.
 
@@ -334,7 +335,7 @@ Rules are scored by outcome. A recalled rule that restores its filer gets `helpf
 
 GitHub Actions (`.github/workflows/ci.yml`) runs the test suite, conformance, smoke test and the demo on Python 3.11 and 3.12, then builds the Docker image and probes `/health` and `/run` inside the container.
 
-`python scripts/run_conformance.py` verifies 7 subsystems: the four engines, the provider contract, the Zetaris DQ rule, and the orchestrated cold → compounding path. Running `python -m pytest tests/ -v` (65 tests) verifies the following. Tests run against an isolated logs/H-MEM directory (`tests/conftest.py`), so results never depend on a previous run.
+`python scripts/run_conformance.py` verifies 7 subsystems: the four engines, the provider contract, the Zetaris DQ rule, and the orchestrated cold → compounding path. Running `python -m pytest tests/ -v` (79 tests) verifies the following. Tests run against an isolated logs/H-MEM directory (`tests/conftest.py`), so results never depend on a previous run.
 - `tests/test_engines_conformance.py`: H-MEM mandatory source gate, 8-factor math, trust protection, non-mutating sleep preview; Markovian bounds, marker stripping, token math, memory seam; World Model `ent_` SHA-256 determinism & zero-diff idempotency; Scout Intent injection blocking & HMAC-SHA256 verification.
 - `tests/test_provider_contract.py`: URL normalisation never `/v1/v1`, `rt-local` rejection, 8 `parse_connect_link` edge cases, and Nemotron task routing.
 - `tests/test_end_to_end.py`: `GET /health`, the three canonical examples, Vibe Coding payload, workbench, telemetry and USL setup.
@@ -363,7 +364,7 @@ Accepts the judge payload `{run_id, input: {query}, options: {sample_mode, warm_
 FastAPI (MIT), Uvicorn (BSD-3), Pydantic (MIT), HTTPX (BSD-3), Tenacity (Apache-2.0), python-dotenv (BSD-3), pytest (MIT, dev only). The Meterless engine designs follow the Apache-2.0 specs at github.com/Meterless/Meterless. The Lightning SQL patterns in `scripts/zetaris_onboard.py` follow the Apache-2.0 zetaris/getting-started repo. No third-party source code was copied.
 
 ## Demo Video
-`OAH2026-AuditWhy-ExplainWhy-Demo.mp4`: link to be added before submission. The timed script is in [docs/SUBMISSION.md](docs/SUBMISSION.md), and the terminal segment uses `python scripts/demo.py --pause`. The form answers and the sponsor-technology explanation are in the same file.
+`OAH2026-AuditWhy-ExplainWhy-Demo.mp4`: link to be added before submission. The slide deck is in [docs/AuditWhy-deck.pdf](docs/AuditWhy-deck.pdf). The timed script is in [docs/SUBMISSION.md](docs/SUBMISSION.md), and the terminal segment uses `python scripts/demo.py --pause`. The form answers and the sponsor-technology explanation are in the same file.
 
 ## Limitations & Pre-Existing Declarations
 - **Pre-Existing Code / Assets:** **None.** Every line of code, SQL script, sample dataset, engine implementation, and test in this repository was built from scratch for the Open Agent Hackathon 2026.
