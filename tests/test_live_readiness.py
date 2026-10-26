@@ -117,6 +117,15 @@ def test_chat_completion_reports_the_serving_model(monkeypatch) -> None:
     assert seen["body"]["model"] == "meterless/text.auto"
 
 
+def test_lanes_request_their_nemotron_model_when_the_runtime_advertises_it(monkeypatch) -> None:
+    monkeypatch.delenv("METERLESS_MODEL", raising=False)
+    c = mp.MeterlessProviderClient(base_url="http://127.0.0.1:8088/v1", api_key="tok")
+    c.available_models = ["meterless/auto", "meterless/deep", mp.settings.nvidia_deep_model, mp.settings.nvidia_fast_model]
+    assert c.resolve_model("evaluate") == mp.settings.nvidia_deep_model  # judge lane on Ultra, not the 4B default
+    assert c.resolve_model("plan") == mp.settings.nvidia_fast_model
+    assert c.resolve_model("synthesize") == "meterless/auto"  # synth model not advertised -> routing mode
+
+
 def test_chat_completion_uses_routed_model_and_strips_leaked_reasoning(monkeypatch) -> None:
     """Shape observed from Nightshift 1.2.7 on Windows: routing in `meterless`, reasoning leaked before </think>."""
     seen = {}

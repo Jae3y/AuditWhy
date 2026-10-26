@@ -201,14 +201,19 @@ class MeterlessProviderClient:
     def resolve_model(self, task: str) -> str:
         """Pick the routing mode for a task.
 
-        A METERLESS_MODEL pin wins (use it to lock a Nemotron-backed lane for award evidence). Otherwise the task's
-        class.disposition is used when the runtime advertises it, falling back to meterless/auto, which every
+        A METERLESS_MODEL pin wins (use it to lock a Nemotron-backed lane for award evidence). Next, the task's
+        planned Nemotron model is requested by id when the runtime advertises it: Nightshift 1.2.7 serves concrete
+        provider ids exactly, while its deep/judge modes collapse to the smallest lane, so the judge would otherwise
+        run on a 4B model. Then the class.disposition if advertised, falling back to meterless/auto, which every
         runtime serves. Routing modes not recognised here are kept, never rewritten.
         """
         pinned = settings.meterless_model
         if pinned:
             return pinned
-        wanted = plan_route(task)["meterless_model"]
+        route = plan_route(task)
+        if route["nvidia_model"] in self.available_models:
+            return route["nvidia_model"]
+        wanted = route["meterless_model"]
         if not self.available_models or wanted in self.available_models:
             return wanted
         return DEFAULT_ROUTING_MODE if DEFAULT_ROUTING_MODE in self.available_models else self.available_models[0]
