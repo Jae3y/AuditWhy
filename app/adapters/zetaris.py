@@ -25,7 +25,30 @@ class ZetarisSQLValidationError(ValueError):
     """Raised when a query violates Zetaris Lightning SQL single-statement rules."""
 
 
-_CATALOG_MISS = re.compile(r"(table or view not found|no such table|does not exist|cannot resolve|not found in database)", re.I)
+_CATALOG_MISS = re.compile(
+    r"(TABLE_OR_VIEW_NOT_FOUND|table or view not found|cannot be found|no such table|does not exist|cannot resolve|"
+    r"not found in database)",
+    re.I,
+)
+
+# Zetaris REST returns every cell as a string ({"headers": [...], "data": [["10"]]}). Codes and identifiers stay
+# strings (CIK 0000051143, SIC 3570); everything else that parses as a number or boolean is coerced back.
+_IDENTIFIER_COLUMN = re.compile(r"(cik|code|sic|_id$|^id$|group|division|fiscal_year|ticker|zone|region|name)", re.I)
+_INT_TEXT = re.compile(r"^-?(0|[1-9]\d*)$")
+_FLOAT_TEXT = re.compile(r"^-?\d+\.\d+(?:[eE][-+]?\d+)?$|^-?\d+[eE][-+]?\d+$")
+
+
+def _coerce_cell(column: str, value: Any) -> Any:
+    if not isinstance(value, str) or _IDENTIFIER_COLUMN.search(column or ""):
+        return value
+    v = value.strip()
+    if v.lower() in ("true", "false"):
+        return v.lower() == "true"
+    if _INT_TEXT.match(v):
+        return int(v)
+    if _FLOAT_TEXT.match(v):
+        return float(v)
+    return value
 
 
 def _is_transient(exc: BaseException) -> bool:
@@ -38,8 +61,9 @@ def _is_transient(exc: BaseException) -> bool:
 def normalize_zetaris_rows(data: Any) -> List[Dict[str, Any]]:
     """Coerce the result shapes Zetaris REST can return into a list of row dicts.
 
-    Handles `{"rows": [{...}]}`, `{"data": [{...}]}`, columnar `{"columns": [...], "data"|"rows": [[...]]}` (with
-    columns as names or `{"name": ...}` objects), the same nested under `result`, and a bare list.
+    Handles `{"rows": [{...}]}`, `{"data": [{...}]}`, columnar `{"columns"|"headers": [...], "data"|"rows": [[...]]}`
+    (with columns as names or `{"name": ...}` objects), the same nested under `result`, and a bare list. The local
+    2.4.3 bundle answers `{"headers": [...], "data": [[...]], "total": n}` with string cells, which are coerced.
     """
     if isinstance(data, dict) and isinstance(data.get("result"), (dict, list)):
         data = data["result"]
@@ -50,14 +74,14 @@ def normalize_zetaris_rows(data: Any) -> List[Dict[str, Any]]:
     rows = data.get("rows", data.get("data", data.get("records", [])))
     if not isinstance(rows, list):
         return []
-    columns = data.get("columns") or data.get("schema") or []
+    columns = data.get("columns") or data.get("headers") or data.get("schema") or []
     names = [c.get("name") or c.get("columnName") if isinstance(c, dict) else str(c) for c in columns]
     out: List[Dict[str, Any]] = []
     for row in rows:
         if isinstance(row, dict):
-            out.append(row)
+            out.append({k: _coerce_cell(k, v) for k, v in row.items()})
         elif isinstance(row, (list, tuple)) and names:
-            out.append(dict(zip(names, row)))
+            out.append({k: _coerce_cell(k, v) for k, v in zip(names, row)})
     return out
 
 

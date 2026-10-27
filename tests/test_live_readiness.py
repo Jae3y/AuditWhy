@@ -117,6 +117,36 @@ def test_chat_completion_reports_the_serving_model(monkeypatch) -> None:
     assert seen["body"]["model"] == "meterless/text.auto"
 
 
+def test_normalizes_the_local_bundles_headers_shape_with_string_cells() -> None:
+    """Exact shape returned by the Zetaris 2.4.3 local bundle: every cell is a string."""
+    from app.adapters.zetaris import normalize_zetaris_rows
+
+    rows = normalize_zetaris_rows({
+        "headers": ["cik", "sic_code", "revenue_2025", "q3_net_retention_pct", "is_leaf_4digit", "company_name", "n"],
+        "data": [["0000051143", "3570", "62753000000", "86.99", "false", "INTERNATIONAL BUSINESS MACHINES CORP", "10"]],
+        "total": 1, "timeUsed": 349,
+    })
+    assert rows == [{
+        "cik": "0000051143", "sic_code": "3570",  # identifiers keep their exact text
+        "revenue_2025": 62753000000, "q3_net_retention_pct": 86.99, "is_leaf_4digit": False,
+        "company_name": "INTERNATIONAL BUSINESS MACHINES CORP", "n": 10,
+    }]
+
+
+def test_live_table_or_view_not_found_is_a_catalog_miss_not_an_outage(monkeypatch) -> None:
+    from app.adapters import zetaris as z
+
+    msg = ("[TABLE_OR_VIEW_NOT_FOUND] The table or view `erp`.`pricing_tier_changes` cannot be found. "
+           "Verify the spelling and correctness of the schema and catalog.")
+    real_client = httpx.Client
+    monkeypatch.setattr(z.httpx, "Client", lambda *a, **k: real_client(
+        transport=httpx.MockTransport(lambda req: httpx.Response(400, json={"msg": msg}))))
+    c = z.ZetarisClient(sample_mode=False, api_key="k")
+    res = c.run_sql("SELECT * FROM erp.pricing_tier_changes LIMIT 5")
+    assert res["status"] == "TABLE_NOT_FOUND" and res["execution_engine"] == "ZetarisLightningREST"
+    assert c.live_unavailable_reason is None  # the circuit stays closed; later queries still go live
+
+
 def test_zetaris_signs_in_with_username_and_password_when_no_api_key(monkeypatch) -> None:
     from app.adapters import zetaris as z
 
