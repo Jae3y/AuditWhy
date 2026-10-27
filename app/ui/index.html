@@ -474,7 +474,7 @@
         const z = String(d.zetaris_status || "");
         document.getElementById("health-badges").innerHTML = `
           <span><i class="dot ${d.status === "ok" ? "on" : ""}"></i>Service ${esc(d.status)} · v${esc(d.version)}</span>
-          <span><i class="dot ${d.sample_mode ? "sample" : "on"}"></i>${d.sample_mode ? "Sample data" : "Live data"}</span>
+          <span><i class="dot ${d.sample_mode ? "sample" : "on"}"></i>${d.sample_mode ? "Sample data" : "Live mode"}</span>
           <span><i class="dot ${z === "online" ? "on" : ""}"></i>Zetaris ${esc(words(z))}</span>
           <span><i class="dot ${String(d.provider_status).startsWith("meterless") ? "on" : ""}"></i>Model: ${esc(words(d.provider_status))}</span>`;
       } catch (e) {
@@ -504,6 +504,16 @@
       setStatus(`Loaded the ${["", "cold investigation", "memory follow-up", "injection attempt"][n]} example. Press Investigate to run it.`);
     }
     document.querySelectorAll(".chip[data-preset]").forEach(c => c.addEventListener("click", () => loadPreset(Number(c.dataset.preset))));
+
+    // Say exactly which layers were live: a live run whose Zetaris calls fell back to the mirror is not "live data".
+    function dataModeLabel(data) {
+      if (data.sample_mode) return "on sample data";
+      const modes = ((data.zetaris_lineage || {}).execution_modes) || [];
+      const liveData = modes.includes("live_zetaris"), mirror = modes.includes("sample_zetaris");
+      const liveModels = ((data.provider_routing || {}).calls || []).some(c => c.live);
+      const dataPart = liveData && !mirror ? "live Zetaris data" : liveData ? "live Zetaris data (some queries fell back to the mirror)" : "sample data (Zetaris unreachable)";
+      return `on ${dataPart}${liveModels ? ", live models" : ""}`;
+    }
 
     function setStatus(text, isErr) {
       const el = document.getElementById("run-status");
@@ -554,7 +564,7 @@
       const verified = hyps.filter(h => OK.has(h.status)).length;
       const revisions = events.filter(e => e.status === "needs_revision").length;
       const statusWord = { success: "Answered", blocked: "Refused", error: "Stopped", partial_success: "Partly answered" }[data.status] || data.status;
-      document.getElementById("answer-note").innerHTML = `<span class="status-tag ${tagClass(data.status === "blocked" ? "blocked" : data.status)}">${mark(data.status === "success" ? "success" : data.status)} ${esc(statusWord)}</span> · ${data.sample_mode ? "on sample data" : "on live data"} · run ${esc(data.run_id)}`;
+      document.getElementById("answer-note").innerHTML = `<span class="status-tag ${tagClass(data.status === "blocked" ? "blocked" : data.status)}">${mark(data.status === "success" ? "success" : data.status)} ${esc(statusWord)}</span> · ${esc(dataModeLabel(data))} · run ${esc(data.run_id)}`;
       document.getElementById("verdict-line").innerHTML = data.status === "blocked" ? "" : `
         <div><strong>${Number(data.confidence || 0).toFixed(2)}</strong>confidence</div>
         <div><strong>${verified} of ${hyps.length}</strong>hypotheses supported</div>
