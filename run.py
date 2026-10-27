@@ -5,7 +5,7 @@ Usage:
      python run.py
      -> Starts FastAPI + Uvicorn bound to 0.0.0.0 on int(os.getenv("PORT", "8000"))
   2. CLI Mode:
-     python run.py --input input_examples/example_1.json --output output_examples/example_1.json
+     python run.py --input input_examples/example_1.json --output runs/example_1.json
 """
 
 from __future__ import annotations

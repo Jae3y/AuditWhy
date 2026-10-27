@@ -46,7 +46,7 @@
   },
   "entrypoints": {
     "server": "python run.py",
-    "cli": "python run.py --input input_examples/example_1.json --output output_examples/example_1.json",
+    "cli": "python run.py --input input_examples/example_1.json --output runs/example_1.json",
     "health": "GET /health",
     "run": "POST /run",
     "dashboard": "GET /",

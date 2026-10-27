@@ -7,7 +7,6 @@ __pycache__
 .pytest_cache
 .env
 .env.*
-!.env.example
 logs/*.jsonl
 logs/*.json
 tests

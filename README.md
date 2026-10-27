@@ -167,8 +167,13 @@ python -m venv .venv
 # 2. Install dependencies (requirements.txt = runtime only; -dev adds pytest)
 pip install -r requirements-dev.txt
 
-# 3. Copy environment template (defaults to SAMPLE_MODE=true, PORT=8000)
-cp .env.example .env
+# 3. Sample mode needs no configuration (defaults: SAMPLE_MODE=true, PORT=8000).
+#    For live mode, create a .env file (git-ignored) with:
+#      SAMPLE_MODE=false
+#      ZETARIS_API_KEY=...          # Zetaris UI > Management > API Tokens
+#      METERLESS_RUNTIME_TOKEN=...  # Nightshift > Console > Runtime access token
+#    Optional: ZETARIS_REST_URL (default http://localhost:8888/api/v1.0), ZETARIS_ORG_ID (default 1),
+#    METERLESS_BASE_URL (default http://127.0.0.1:8088/v1), SOURCE_TIMEOUT_SECONDS (default 30).
 
 # 4. Run the full unit, engine conformance, provider v4, and end-to-end test suite
 python -m pytest tests/ -v
@@ -179,15 +184,16 @@ python scripts/smoke_test.py
 ```
 
 ### 2. CLI Execution Across All 3 Canonical Input Examples
+Each run writes its full report to `runs/` (git-ignored). The committed evidence in `output_examples/` is the 27 Oct fully live run: `live_example_1.json` (cold) and `live_example_2.json` (memory follow-up).
 ```bash
 # Example 1: Cold Investigation Run (Catches IBM SIC 3570 orphan, blocks H4 pricing claim, mines rule into H-MEM)
-python run.py --input input_examples/example_1.json --output output_examples/example_1.json
+python run.py --input input_examples/example_1.json --output runs/example_1.json
 
 # Example 2: Warm Memory Compounding Run (Recalls SIC 3570->3571 rule at Chunk 0: 1 retrieval pass, 3 stages vs 4, no retry)
-python run.py --input input_examples/example_2.json --output output_examples/example_2.json
+python run.py --input input_examples/example_2.json --output runs/example_2.json
 
 # Example 3: Adversarial Prompt Injection & Conflict Test (Scout 5-layer guard blocks DROP TABLE & exfiltration)
-python run.py --input input_examples/example_3.json --output output_examples/example_3.json
+python run.py --input input_examples/example_3.json --output runs/example_3.json
 ```
 
 ### 3. Start the FastAPI Server + Interactive Lineage Dashboard (`0.0.0.0:8000`)

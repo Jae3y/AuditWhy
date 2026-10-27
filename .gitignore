@@ -21,6 +21,9 @@ Thumbs.db
 .idea/
 
 logs/*.jsonl
+
+# CLI run outputs (committed evidence lives in output_examples/live_example_*.json)
+runs/
 logs/hmem_state_store.json
 
 logs/*.json.tmp
@@ -32,7 +35,6 @@ data/*.db.tmp
 
 # Secrets (hackathon disqualification checklist)
 .env.*
-!.env.example
 *.pem
 *.key
 secrets/
