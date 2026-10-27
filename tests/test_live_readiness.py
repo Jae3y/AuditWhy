@@ -133,6 +133,17 @@ def test_normalizes_the_local_bundles_headers_shape_with_string_cells() -> None:
     }]
 
 
+def test_expands_show_dq_invalid_records() -> None:
+    """Exact live answer of SHOW DQ ALL INVALID TABLE ...sic_edgar_usl.company on the 2.4.3 bundle."""
+    from app.adapters.zetaris import normalize_zetaris_rows
+
+    rows = normalize_zetaris_rows({"headers": ["records"], "data": [[
+        "{\"cik\":\"0000051143\",\"entity_name\":\"INTERNATIONAL BUSINESS MACHINES CORP\",\"sic\":\"3570\","
+        "\"sic_description_edgar\":\"Computer & office Equipment\"}"]], "total": 1})
+    assert rows == [{"cik": "0000051143", "entity_name": "INTERNATIONAL BUSINESS MACHINES CORP", "sic": "3570",
+                     "sic_description_edgar": "Computer & office Equipment"}]
+
+
 def test_live_table_or_view_not_found_is_a_catalog_miss_not_an_outage(monkeypatch) -> None:
     from app.adapters import zetaris as z
 

@@ -27,7 +27,7 @@ class ZetarisSQLValidationError(ValueError):
 
 _CATALOG_MISS = re.compile(
     r"(TABLE_OR_VIEW_NOT_FOUND|table or view not found|cannot be found|no such table|does not exist|cannot resolve|"
-    r"not found in database)",
+    r"not found in database|SemanticLayerNotFoundException|is not existing)",
     re.I,
 )
 
@@ -81,7 +81,18 @@ def normalize_zetaris_rows(data: Any) -> List[Dict[str, Any]]:
         if isinstance(row, dict):
             out.append({k: _coerce_cell(k, v) for k, v in row.items()})
         elif isinstance(row, (list, tuple)) and names:
-            out.append({k: _coerce_cell(k, v) for k, v in zip(names, row)})
+            record = dict(zip(names, row))
+            # SHOW DQ ... INVALID answers one JSON document per row in a single `records` column; expand it.
+            if len(record) == 1 and isinstance(next(iter(record.values())), str):
+                only = next(iter(record.values())).strip()
+                if only.startswith("{"):
+                    try:
+                        parsed = json.loads(only)
+                        if isinstance(parsed, dict):
+                            record = parsed
+                    except json.JSONDecodeError:
+                        pass
+            out.append({k: _coerce_cell(k, v) for k, v in record.items()})
     return out
 
 
