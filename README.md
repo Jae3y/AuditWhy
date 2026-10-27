@@ -216,7 +216,9 @@ Inside Docker the browser is not a loopback client, so the credentials panel nee
 ### 5. Live Mode: Zetaris + Meterless Nightshift + NVIDIA Nemotron
 Per the Participant Setup Guide, Zetaris and Nightshift run **on your machine**. The app never holds your NVIDIA key.
 
-1. **Zetaris:** register at `cloud.enterprise.zetaris.com`, download the platform bundle, then `docker compose up -d` and `./verify.sh` (expect 9/9). Create an API token in the UI at `http://localhost:3000` under **Management > API Tokens > +**.
+1. **Zetaris:** register at `cloud.enterprise.zetaris.com`, download the platform bundle, run its `docker login` command, then `docker compose up -d` and `./verify.sh`. For credentials, either create an API token in the UI at `http://localhost:3000` under **Management > API Tokens > +** (`ZETARIS_API_KEY`), or set `ZETARIS_USERNAME` / `ZETARIS_PASSWORD` to the bundle's admin account. AuditWhy then signs in through `/api/auth/login`, as zetaris/getting-started's own scripts do.
+   - *Antivirus HTTPS scanning* (for example Avast Web Shield) re-signs certificates with its own root, which the engine's Java rejects (`PKIX path building failed`). Mount a copy of the JDK trust store that includes that public root through a `docker-compose.override.yml` in the bundle folder, rather than turning the scanner off.
+   - After building `sic_edgar_usl`, run `CACHE TABLE` on its `sec_data.*_submissions_raw` sources. Otherwise every DQ query refetches `data.sec.gov`.
 2. **Official USL + DQ rule:** in a clone of [zetaris/getting-started](https://github.com/zetaris/getting-started), run `python3 scripts/onboard.py run sic_edgar_usl --dry-run`, then run it again without `--dry-run`. This builds `lightning.metastore.usl_demo.sic_edgar_usl`, whose foreign-key DQ rule flags IBM's SIC 3570 against live SEC EDGAR data.
 3. **AuditWhy's internal tables:** `python scripts/zetaris_onboard.py` prints the statements (dry run). `python scripts/zetaris_onboard.py --apply` registers ERP billing, support telemetry, EDGAR facts and SIC leaves as Zetaris REST tables plus `auditwhy.*` views, from this repo's `data/zetaris/*.json`, then verifies row counts.
 4. **Nightshift:** install the desktop build (Windows: meterless.ai/windows.html; no NVIDIA GPU needed, since cloud lanes use NVIDIA's hosted API) and leave it running. Paste your `nvapi-` key into **Setup > Providers > Cloud provider keys > NVIDIA**, then restart Nightshift once so the engine loads the key. The runtime serves `http://127.0.0.1:8088/v1` and writes its token to `%LOCALAPPDATA%\ai.meterless.runtime\proxy-token` on Windows.
@@ -294,7 +296,13 @@ Rules are scored by outcome. A recalled rule that restores its filer gets `helpf
   - `analyze` / `synthesize` → `nvidia/nemotron-3.5-super-vl-120b-a12b`
 
   When Nightshift advertises a lane's model in `/v1/models`, AuditWhy requests it by id. On Nightshift 1.2.7 (Windows), the `meterless/deep` and `judge` modes all routed to the smallest lane, so requesting the model by id is what keeps the judge on Ultra. Otherwise the call uses the routing mode (`meterless/text.fast`, `meterless/judge.deep`, `meterless/text.auto`), falling back to `meterless/auto`. `METERLESS_MODEL` pins one lane for every task. Each call records `served_by`, the model Nightshift reports in `meterless.routed_model`. Reasoning that a lane leaks before `</think>` is stripped, and `max_tokens` has an 800 floor so reasoning lanes never return empty.
-- **Verified live (26 Oct 2026, Nightshift 1.2.7 on Windows):** a full `example_1` run made 10/10 model calls through Nightshift, with planning served by Lightning 30B and the evaluator by Ultra 550B. The verdicts were identical to sample mode.
+- **Verified fully live (27 Oct 2026, Zetaris 2.4.3 local bundle + Nightshift 1.2.7 on Windows):**
+  - `example_1` ran 11/11 Zetaris queries live, with no fallback.
+  - The official `sic_edgar_usl` DQ rule flagged IBM (SIC 3570) from live SEC EDGAR data and drove the revision loop.
+  - 10/10 model calls were served by Nemotron (Lightning 30B, Ultra 550B, Bolt) through Nightshift.
+  - The verdicts were identical to sample mode.
+
+  The evidence is in `output_examples/live_example_*.json` and `docs/live_check_2026-10-27.txt`.
 - **Optional direct Nemotron fallback** ("Option B" in the setup guide): if Nightshift is down and `NVIDIA_API_KEY` / `MODEL_API_KEY` is set, calls go to `integrate.api.nvidia.com` with the same lanes (`enable_thinking` sent as top-level `chat_template_kwargs`, with 2/4/8 s backoff on 429).
 - **Division of labour:** verdicts (DQ, claim gates, reviewer gates) are always computed in code, so `SAMPLE_MODE=true` and a live run reach identical conclusions. Nemotron contributes the narrative for each Markovian chunk, the evaluator summaries, and the writer's executive narrative. Offline, each agent supplies its own data-derived text instead. Provider failures are recorded per call in `provider_routing.calls[].fallback_reasons`, never swallowed.
 
@@ -335,7 +343,7 @@ Rules are scored by outcome. A recalled rule that restores its filer gets `helpf
 
 GitHub Actions (`.github/workflows/ci.yml`) runs the test suite, conformance, smoke test and the demo on Python 3.11 and 3.12, then builds the Docker image and probes `/health` and `/run` inside the container.
 
-`python scripts/run_conformance.py` verifies 7 subsystems: the four engines, the provider contract, the Zetaris DQ rule, and the orchestrated cold → compounding path. Running `python -m pytest tests/ -v` (79 tests) verifies the following. Tests run against an isolated logs/H-MEM directory (`tests/conftest.py`), so results never depend on a previous run.
+`python scripts/run_conformance.py` verifies 7 subsystems: the four engines, the provider contract, the Zetaris DQ rule, and the orchestrated cold → compounding path. Running `python -m pytest tests/ -v` (83 tests) verifies the following. Tests run against an isolated logs/H-MEM directory (`tests/conftest.py`), so results never depend on a previous run.
 - `tests/test_engines_conformance.py`: H-MEM mandatory source gate, 8-factor math, trust protection, non-mutating sleep preview; Markovian bounds, marker stripping, token math, memory seam; World Model `ent_` SHA-256 determinism & zero-diff idempotency; Scout Intent injection blocking & HMAC-SHA256 verification.
 - `tests/test_provider_contract.py`: URL normalisation never `/v1/v1`, `rt-local` rejection, 8 `parse_connect_link` edge cases, and Nemotron task routing.
 - `tests/test_end_to_end.py`: `GET /health`, the three canonical examples, Vibe Coding payload, workbench, telemetry and USL setup.

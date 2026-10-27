@@ -39,7 +39,7 @@ Everything the HackOS submission form asks for, ready to paste. Hard deadline: *
 - **Markovian** runs the analysis as bounded chunks with compressed carryover. A warm run skips a whole stage, and the token savings are measured (not projected).
 - **H-MEM** stores the reconciliation rule with provenance. It scores recalled rules by outcome (helpful / wrong) and supersedes a wrong rule automatically.
 
-The conformance suite (`scripts/run_conformance.py`, 7/7) and 77 tests verify them. **Nightshift** is the primary model provider: every agent model call goes to the OpenAI-compatible runtime with the runtime token and `meterless-app` / `meterless-scope` headers, under provider contract v4.
+The conformance suite (`scripts/run_conformance.py`, 7/7) and 83 tests verify them. **Nightshift** is the primary model provider: every agent model call goes to the OpenAI-compatible runtime with the runtime token and `meterless-app` / `meterless-scope` headers, under provider contract v4.
 
 **NVIDIA Nemotron.** Three Nemotron lanes, routed by task class:
 - a fast lane (`nemotron-3.5-lightning-30b-a3b`) for planning;
@@ -89,8 +89,8 @@ Record at 1080p with a large terminal font and the browser at 110–125% zoom. N
 | 3+ sample inputs and outputs, JSONL traces in `logs/` | Done |
 | No hardcoded outputs (perturbation tests in `tests/test_investigation_integrity.py`) | Done |
 | No committed secrets (`.env` gitignored; scan clean) | Done |
-| NVIDIA Nemotron live | Done: direct hosted route verified (8 of 10 calls live on `example_1`) |
-| Zetaris and Meterless integrated | Done in code. A live Zetaris run needs a local bundle or an AWS managed cluster (there is no shared instance). Live Nightshift needs the Windows desktop build. If neither is live at submission, say clearly which parts were tested against mocks, as Meterless asked |
+| Zetaris, Meterless and NVIDIA live | Done and verified on 27 Oct. Local Zetaris 2.4.3 served 11/11 queries, and the official `sic_edgar_usl` DQ rule flagged IBM from live SEC data. Nightshift 1.2.7 served 10/10 Nemotron calls. Evidence: `output_examples/live_example_*.json`, `docs/live_check_2026-10-27.txt` |
+| HackOS draft | Saved (track, description, GitHub link, deck PDF). Add the video link, then press Submit |
 | Demo video 1–4 min, link opens in a private window | **To do** (script above) |
 | Slide deck (8 points) | Done; share or export it before submitting |
 | Submitted on HackOS before 23:45 UTC, 27 Oct | **To do** |

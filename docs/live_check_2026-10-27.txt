@@ -1,0 +1,20 @@
+AuditWhy live-stack preflight (secrets are never printed)
+
+== Zetaris (http://localhost:8888/api/v1.0, org 1)
+[PASS] REST SELECT 1: HTTP 200
+[PASS] table auditwhy.edgar_company_facts: 10 rows
+[PASS] table auditwhy.sic_codes: 8 rows
+[PASS] table auditwhy.customer_churn_billing: 10 rows
+[PASS] table auditwhy.support_tickets_usage: 10 rows
+[PASS] official sic_edgar_usl DQ: 1 invalid record(s): INTERNATIONAL BUSINESS MACHINES CORP
+
+== Meterless Nightshift (http://127.0.0.1:8088/v1, app 'auditwhy')
+[PASS] GET /v1/models: online
+       routing modes advertised: meterless/auto, meterless/fast, meterless/deep, meterless/cheap, meterless/local, meterless/fusion, meterless/cluster, meterless/text, meterless/code, meterless/vision, meterless/perception, meterless/image
+[PASS] chat completion: meterless/auto -> 'ready' (served by nvidia/nemotron-3.5-bolt-e4b)
+[PASS] Nemotron lane: a Nemotron model served the request
+
+== Direct Nemotron route, optional fallback (https://integrate.api.nvidia.com/v1)
+[PASS] chat completion: nvidia/nemotron-3.5-lightning-30b-a3b: HTTP 200
+
+READY: run with SAMPLE_MODE=false
