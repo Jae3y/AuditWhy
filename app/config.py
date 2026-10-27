@@ -76,7 +76,7 @@ def redact_sensitive_text(text: str) -> str:
         else:
             sanitized = pattern.sub("[REDACTED]", sanitized)
     # Also redact any configured non-empty env key values if they appear verbatim
-    for env_key in ("ZETARIS_API_KEY", "METERLESS_RUNTIME_TOKEN", "METERLESS_API_KEY", "NVIDIA_API_KEY", "MODEL_API_KEY"):
+    for env_key in ("ZETARIS_API_KEY", "ZETARIS_PASSWORD", "METERLESS_RUNTIME_TOKEN", "METERLESS_API_KEY", "NVIDIA_API_KEY", "MODEL_API_KEY"):
         val = os.getenv(env_key, "").strip()
         if val and len(val) >= 6 and val in sanitized:
             sanitized = sanitized.replace(val, "[REDACTED]")
@@ -119,6 +119,20 @@ class Settings:
     @property
     def zetaris_api_key(self) -> str:
         return os.getenv("ZETARIS_API_KEY", "").strip()
+
+    @property
+    def zetaris_username(self) -> str:
+        """Alternative to an API key: sign in through the UI's /api/auth/login (zetaris/getting-started does the same)."""
+        return os.getenv("ZETARIS_USERNAME", "").strip()
+
+    @property
+    def zetaris_password(self) -> str:
+        return os.getenv("ZETARIS_PASSWORD", "").strip()
+
+    @property
+    def zetaris_base_url(self) -> str:
+        """The Zetaris UI origin that serves /api/auth/login (local bundle: http://localhost:3000)."""
+        return (os.getenv("ZETARIS_BASE_URL", "") or "http://localhost:3000").strip().rstrip("/")
 
     @property
     def zetaris_org_id(self) -> int:

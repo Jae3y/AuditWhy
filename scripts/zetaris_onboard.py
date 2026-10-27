@@ -2,7 +2,7 @@
 
 Follows the zetaris/getting-started rules: dry-run first, one statement per call, 15 s between statements that call
 an endpoint, verify row counts against the source. Credentials come from .env (ZETARIS_REST_URL, ZETARIS_ORG_ID,
-ZETARIS_API_KEY) and are never printed.
+ZETARIS_API_KEY, or ZETARIS_USERNAME/ZETARIS_PASSWORD for a local bundle) and are never printed.
 
 Prerequisite for the DQ check: build the official sic_edgar_usl from a clone of zetaris/getting-started
 (`python3 scripts/onboard.py run sic_edgar_usl --dry-run`, then without --dry-run). That USL's foreign-key rule is
@@ -31,6 +31,7 @@ if str(ROOT) not in sys.path:
 
 import httpx  # noqa: E402
 
+from app.adapters.zetaris import resolve_zetaris_token  # noqa: E402
 from app.config import SAMPLE_DATA_DIR, settings  # noqa: E402
 
 PUBLISH_DIR = ROOT / "data" / "zetaris"
@@ -93,7 +94,7 @@ def statements(base_url: str) -> List[Tuple[str, bool]]:
 
 def _post(sql: str) -> httpx.Response:
     headers = {
-        "Authorization": f"Bearer {settings.zetaris_api_key}",
+        "Authorization": f"Bearer {resolve_zetaris_token()}",
         "X-Org-ID": str(settings.zetaris_org_id),
         "X-Request-ID": str(uuid.uuid4()),
         "Content-Type": "application/json",
@@ -104,8 +105,8 @@ def _post(sql: str) -> httpx.Response:
 
 
 def apply(base_url: str, pace: float) -> bool:
-    if not settings.zetaris_api_key:
-        print("ZETARIS_API_KEY is not set in .env (Zetaris UI: Management > API Tokens > +).")
+    if not resolve_zetaris_token():
+        print("No Zetaris credentials: set ZETARIS_API_KEY (UI > Management > API Tokens) or ZETARIS_USERNAME/ZETARIS_PASSWORD.")
         return False
     ok = True
     for i, (sql, calls_endpoint) in enumerate(statements(base_url), 1):
@@ -126,8 +127,8 @@ def apply(base_url: str, pace: float) -> bool:
 
 
 def verify() -> bool:
-    if not settings.zetaris_api_key:
-        print("ZETARIS_API_KEY is not set in .env.")
+    if not resolve_zetaris_token():
+        print("No Zetaris credentials in .env.")
         return False
     all_ok = True
     for name, (_, view) in SOURCES.items():

@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 import httpx  # noqa: E402
 
 from app.adapters.meterless_provider import MeterlessProviderClient, is_valid_meterless_token  # noqa: E402
-from app.adapters.zetaris import apply_table_map, load_live_table_map, normalize_zetaris_rows  # noqa: E402
+from app.adapters.zetaris import apply_table_map, load_live_table_map, normalize_zetaris_rows, resolve_zetaris_token  # noqa: E402
 from app.config import settings  # noqa: E402
 
 results: list = []
@@ -33,7 +33,7 @@ def report(name: str, ok: bool, detail: str, required: bool = True) -> None:
 
 def zetaris_sql(sql: str) -> httpx.Response:
     headers = {
-        "Authorization": f"Bearer {settings.zetaris_api_key}",
+        "Authorization": f"Bearer {resolve_zetaris_token()}",
         "X-Org-ID": str(settings.zetaris_org_id),
         "X-Request-ID": str(uuid.uuid4()),
         "Content-Type": "application/json",
@@ -45,8 +45,8 @@ def zetaris_sql(sql: str) -> httpx.Response:
 
 def check_zetaris() -> None:
     print(f"\n== Zetaris ({settings.zetaris_rest_url}, org {settings.zetaris_org_id})")
-    if not settings.zetaris_api_key:
-        report("API key", False, "ZETARIS_API_KEY empty. Zetaris UI (http://localhost:3000): Management > API Tokens > +")
+    if not resolve_zetaris_token():
+        report("API key", False, "No Zetaris credentials: set ZETARIS_API_KEY (UI > Management > API Tokens) or ZETARIS_USERNAME/ZETARIS_PASSWORD")
         return
     try:
         resp = zetaris_sql("SELECT 1 AS one")

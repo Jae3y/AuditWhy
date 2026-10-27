@@ -117,6 +117,32 @@ def test_chat_completion_reports_the_serving_model(monkeypatch) -> None:
     assert seen["body"]["model"] == "meterless/text.auto"
 
 
+def test_zetaris_signs_in_with_username_and_password_when_no_api_key(monkeypatch) -> None:
+    from app.adapters import zetaris as z
+
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"idToken": "jwt-abc", "refreshToken": "r", "orgId": 1})
+
+    real_client = httpx.Client
+    monkeypatch.setattr(z.httpx, "Client", lambda *a, **k: real_client(transport=httpx.MockTransport(handler)))
+    monkeypatch.setenv("ZETARIS_API_KEY", "")
+    monkeypatch.setenv("ZETARIS_USERNAME", "admin@zetaris.com")
+    monkeypatch.setenv("ZETARIS_PASSWORD", "pw")
+    monkeypatch.setenv("ZETARIS_BASE_URL", "http://localhost:3000")
+    z._LOGIN_CACHE.clear()
+    assert z.resolve_zetaris_token() == "jwt-abc"
+    assert seen["url"] == "http://localhost:3000/api/auth/login"
+    assert seen["body"] == {"username": "admin@zetaris.com", "password": "pw"}
+    assert z.ZetarisClient(sample_mode=True).api_key == ""  # sample mode never signs in
+    monkeypatch.setenv("ZETARIS_API_KEY", "key-1")
+    assert z.resolve_zetaris_token() == "key-1"  # an API key always wins
+    z._LOGIN_CACHE.clear()
+
+
 def test_lanes_request_their_nemotron_model_when_the_runtime_advertises_it(monkeypatch) -> None:
     monkeypatch.delenv("METERLESS_MODEL", raising=False)
     c = mp.MeterlessProviderClient(base_url="http://127.0.0.1:8088/v1", api_key="tok")

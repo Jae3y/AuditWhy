@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -123,6 +124,41 @@ def sanitize_zetaris_sql(sql: str) -> str:
     return raw
 
 
+_LOGIN_CACHE: Dict[str, Any] = {}
+_LOGIN_TTL_SECONDS = 45 * 60
+
+
+def resolve_zetaris_token(*, force_refresh: bool = False) -> str:
+    """Bearer token for the REST API: ZETARIS_API_KEY if set, else a session token from /api/auth/login.
+
+    The login route is what zetaris/getting-started's own scripts use when no API key exists. The token is cached per
+    process and refreshed before it ages out. Returns "" when neither credential is configured or login fails.
+    """
+    if settings.zetaris_api_key:
+        return settings.zetaris_api_key
+    user, password = settings.zetaris_username, settings.zetaris_password
+    if not (user and password):
+        return ""
+    key = f"{settings.zetaris_base_url}|{user}"
+    cached = _LOGIN_CACHE.get(key)
+    if cached and not force_refresh and time.monotonic() - cached[1] < _LOGIN_TTL_SECONDS:
+        return cached[0]
+    try:
+        with httpx.Client(timeout=min(30.0, settings.zetaris_timeout_seconds)) as client:
+            r = client.post(f"{settings.zetaris_base_url}/api/auth/login",
+                            json={"username": user, "password": password},
+                            headers={"X-Request-ID": str(uuid.uuid4())})
+        body = r.json() if r.status_code < 300 else {}
+    except (httpx.HTTPError, ValueError):
+        return ""
+    token = ""
+    if isinstance(body, dict):
+        token = body.get("idToken") or body.get("token") or body.get("accessToken") or ""
+    if token:
+        _LOGIN_CACHE[key] = (token, time.monotonic())
+    return token
+
+
 class ZetarisClient:
     """Live Zetaris REST SQL Client (default port 8888, never 8889) with tenacity retry and SampleZetarisEngine fallback."""
 
@@ -142,9 +178,13 @@ class ZetarisClient:
         if ":8889" in base:
             base = base.replace(":8889", ":8888")
         self.rest_url = base.rstrip("/")
-        self.api_key = (api_key if api_key is not None else settings.zetaris_api_key).strip()
-        self.org_id = org_id if org_id is not None else settings.zetaris_org_id
         self.sample_mode = sample_mode if sample_mode is not None else settings.sample_mode
+        if api_key is not None:
+            self.api_key = api_key.strip()
+        else:
+            # Only sign in when the run will actually go live; sample mode never touches the network.
+            self.api_key = "" if self.sample_mode else resolve_zetaris_token()
+        self.org_id = org_id if org_id is not None else settings.zetaris_org_id
         self.scout_engine = scout_engine
         self.trace_logger = trace_logger
         self.sample_engine = sample_engine or get_shared_sample_engine(sample_dir)
