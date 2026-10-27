@@ -372,7 +372,7 @@ Accepts the judge payload `{run_id, input: {query}, options: {sample_mode, warm_
 FastAPI (MIT), Uvicorn (BSD-3), Pydantic (MIT), HTTPX (BSD-3), Tenacity (Apache-2.0), python-dotenv (BSD-3), pytest (MIT, dev only). The Meterless engine designs follow the Apache-2.0 specs at github.com/Meterless/Meterless. The Lightning SQL patterns in `scripts/zetaris_onboard.py` follow the Apache-2.0 zetaris/getting-started repo. No third-party source code was copied.
 
 ## Demo Video
-**[Watch the 2:50 demo](https://iframe.mediadelivery.net/embed/778121/ebdd13e8-a5e4-4624-bb33-d4aaca491e6c)**: a fully live run (local Zetaris and Nightshift serving NVIDIA Nemotron), narrated. A backup copy is in [docs/OAH2026-AuditWhy-ExplainWhy-Demo-small.mp4](docs/OAH2026-AuditWhy-ExplainWhy-Demo-small.mp4). The slide deck is in [docs/AuditWhy-deck.pdf](docs/AuditWhy-deck.pdf). The timed script is in [docs/SUBMISSION.md](docs/SUBMISSION.md), and the terminal segment uses `python scripts/demo.py --pause`. The form answers and the sponsor-technology explanation are in the same file.
+`OAH2026-AuditWhy-ExplainWhy-Demo.mp4`: link to be added before submission. The slide deck is in [docs/AuditWhy-deck.pdf](docs/AuditWhy-deck.pdf). The timed script is in [docs/SUBMISSION.md](docs/SUBMISSION.md), and the terminal segment uses `python scripts/demo.py --pause`. The form answers and the sponsor-technology explanation are in the same file.
 
 ## Limitations & Pre-Existing Declarations
 - **Pre-Existing Code / Assets:** **None.** Every line of code, SQL script, sample dataset, engine implementation, and test in this repository was built from scratch for the Open Agent Hackathon 2026.

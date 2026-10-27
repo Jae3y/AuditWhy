@@ -26,7 +26,7 @@ Everything the HackOS submission form asks for, ready to paste. Hard deadline: *
 
 - **GitHub repository (public):** https://github.com/Jae3y/AuditWhy
 - **Live demo (sample mode, no login):** https://auditwhy.vercel.app
-- **Demo video (2:50, fully live run):** https://iframe.mediadelivery.net/embed/778121/ebdd13e8-a5e4-4624-bb33-d4aaca491e6c (uploaded to HackOS; backup copy in the repo at `docs/OAH2026-AuditWhy-ExplainWhy-Demo-small.mp4`)
+- **Demo video:** *(add the link after upload; test it in a private window)*
 - **Slide deck:** https://claude.ai/artifact/TQSvLVr9sBxQ84T4nLEYhD (9 slides covering the 8 required points). It is private until shared, so use **Share** on the deck to make it viewable, or **Export** it to PDF/PPTX and upload that file.
 
 ## 5. Sponsor technology explanation
@@ -90,7 +90,7 @@ Record at 1080p with a large terminal font and the browser at 110–125% zoom. N
 | No hardcoded outputs (perturbation tests in `tests/test_investigation_integrity.py`) | Done |
 | No committed secrets (`.env` gitignored; scan clean) | Done |
 | Zetaris, Meterless and NVIDIA live | Done and verified on 27 Oct. Local Zetaris 2.4.3 served 11/11 queries, and the official `sic_edgar_usl` DQ rule flagged IBM from live SEC data. Nightshift 1.2.7 served 10/10 Nemotron calls. Evidence: `output_examples/live_example_*.json`, `docs/live_check_2026-10-27.txt` |
-| HackOS draft | Saved (track, description, GitHub link, deck PDF). Add the video link, then press Submit |
-| Demo video 1–4 min, link opens in a private window | Done: 2:50, narrated, uploaded to the HackOS draft |
+| HackOS draft | Saved (track, description, GitHub link, deck PDF). Add the video, then press Submit |
+| Demo video 1–4 min, link opens in a private window | **To do** (operator records it; brief in `docs/DEMO_VIDEO_EDITOR_PROMPT.md`) |
 | Slide deck (8 points) | Done; share or export it before submitting |
 | Submitted on HackOS before 23:45 UTC, 27 Oct | **To do** |
